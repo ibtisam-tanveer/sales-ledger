@@ -18,7 +18,7 @@ export async function validateCustomerReceiptAllocations(params: {
   const { customerId, amountGross, allocations, excludeRemittanceId } = params;
   const allocSum = allocations.reduce((s, a) => s + a.amountGross, 0);
   if (allocSum > amountGross + 0.01) {
-    throw new Error("Allocations exceed remittance amount");
+    throw new Error("Allocations exceed remittance amount ");
   }
 
   const excludeOid = excludeRemittanceId
