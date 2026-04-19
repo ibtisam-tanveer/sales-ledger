@@ -1,8 +1,215 @@
 @import "tailwindcss";
 
+/* App UI is light-themed; avoid OS dark mode flipping text to near-white on white cards/inputs. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fafafa;
+  --foreground: #18181b;
+}
+
+/* Shell chrome — overridden per [data-app-theme] on <html> (see below). */
+:root {
+  --app-border-strong: #a3a3a3;
+  --app-border-muted: #d4d4d4;
+  --app-header-start: #d6d6d6;
+  --app-header-end: #c4c4c4;
+  --app-toolbar-bg: #e8e8e8;
+  --app-tabs-strip: #dcdcdc;
+  --app-tab-inactive: #ececec;
+  --app-shell-bg: #d4d4d4;
+  --app-aside-bg: #ece9e9;
+  --app-aside-header: #dedede;
+  --app-work-bg: #c8c8c8;
+  --app-footer-bg: #dcdcdc;
+  --app-home-btn-border: rgba(82, 82, 91, 0.8);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.85);
+}
+
+html[data-app-theme="slate"] {
+  --app-border-strong: #94a3b8;
+  --app-border-muted: #cbd5e1;
+  --app-header-start: #e2e8f0;
+  --app-header-end: #cbd5e1;
+  --app-toolbar-bg: #f1f5f9;
+  --app-tabs-strip: #e2e8f0;
+  --app-tab-inactive: #f8fafc;
+  --app-shell-bg: #cbd5e1;
+  --app-aside-bg: #e2e8f0;
+  --app-aside-header: #cbd5e1;
+  --app-work-bg: #f1f5f9;
+  --app-footer-bg: #e2e8f0;
+  --app-home-btn-border: rgba(71, 85, 105, 0.85);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.9);
+}
+
+html[data-app-theme="warm"] {
+  --app-border-strong: #d6d3d1;
+  --app-border-muted: #e7e5e4;
+  --app-header-start: #f5f5f4;
+  --app-header-end: #e7e5e4;
+  --app-toolbar-bg: #fafaf9;
+  --app-tabs-strip: #f5f5f4;
+  --app-tab-inactive: #fafaf9;
+  --app-shell-bg: #e7e5e4;
+  --app-aside-bg: #fafaf9;
+  --app-aside-header: #f5f5f4;
+  --app-work-bg: #f5f5f4;
+  --app-footer-bg: #e7e5e4;
+  --app-home-btn-border: rgba(120, 113, 108, 0.75);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.92);
+}
+
+html[data-app-theme="blue"] {
+  --app-border-strong: #93c5fd;
+  --app-border-muted: #bfdbfe;
+  --app-header-start: #e0f2fe;
+  --app-header-end: #bae6fd;
+  --app-toolbar-bg: #f0f9ff;
+  --app-tabs-strip: #e0f2fe;
+  --app-tab-inactive: #f8fafc;
+  --app-shell-bg: #dbeafe;
+  --app-aside-bg: #eff6ff;
+  --app-aside-header: #dbeafe;
+  --app-work-bg: #f0f9ff;
+  --app-footer-bg: #e0f2fe;
+  --app-home-btn-border: rgba(37, 99, 235, 0.45);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.95);
+}
+
+/* Explicit sage (matches :root defaults; applied once prefs load). */
+html[data-app-theme="sage"] {
+  --app-border-strong: #a3a3a3;
+  --app-border-muted: #d4d4d4;
+  --app-header-start: #d6d6d6;
+  --app-header-end: #c4c4c4;
+  --app-toolbar-bg: #e8e8e8;
+  --app-tabs-strip: #dcdcdc;
+  --app-tab-inactive: #ececec;
+  --app-shell-bg: #d4d4d4;
+  --app-aside-bg: #ece9e9;
+  --app-aside-header: #dedede;
+  --app-work-bg: #c8c8c8;
+  --app-footer-bg: #dcdcdc;
+  --app-home-btn-border: rgba(82, 82, 91, 0.8);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.85);
+}
+
+html[data-app-theme="emerald"] {
+  --app-border-strong: #6ee7b7;
+  --app-border-muted: #a7f3d0;
+  --app-header-start: #ecfdf5;
+  --app-header-end: #d1fae5;
+  --app-toolbar-bg: #f0fdf4;
+  --app-tabs-strip: #dcfce7;
+  --app-tab-inactive: #f0fdf4;
+  --app-shell-bg: #bbf7d0;
+  --app-aside-bg: #ecfdf5;
+  --app-aside-header: #d1fae5;
+  --app-work-bg: #f0fdf4;
+  --app-footer-bg: #d1fae5;
+  --app-home-btn-border: rgba(5, 150, 105, 0.5);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.92);
+}
+
+html[data-app-theme="violet"] {
+  --app-border-strong: #c4b5fd;
+  --app-border-muted: #ddd6fe;
+  --app-header-start: #f5f3ff;
+  --app-header-end: #ede9fe;
+  --app-toolbar-bg: #faf5ff;
+  --app-tabs-strip: #f3e8ff;
+  --app-tab-inactive: #faf5ff;
+  --app-shell-bg: #ddd6fe;
+  --app-aside-bg: #f5f3ff;
+  --app-aside-header: #ede9fe;
+  --app-work-bg: #faf5ff;
+  --app-footer-bg: #ede9fe;
+  --app-home-btn-border: rgba(109, 40, 217, 0.45);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.95);
+}
+
+html[data-app-theme="rose"] {
+  --app-border-strong: #f9a8d4;
+  --app-border-muted: #fbcfe8;
+  --app-header-start: #fff1f2;
+  --app-header-end: #ffe4e6;
+  --app-toolbar-bg: #fff1f2;
+  --app-tabs-strip: #fce7f3;
+  --app-tab-inactive: #fdf2f8;
+  --app-shell-bg: #fbcfe8;
+  --app-aside-bg: #fff1f2;
+  --app-aside-header: #fce7f3;
+  --app-work-bg: #fdf2f8;
+  --app-footer-bg: #fce7f3;
+  --app-home-btn-border: rgba(190, 24, 93, 0.4);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.95);
+}
+
+html[data-app-theme="amber"] {
+  --app-border-strong: #fcd34d;
+  --app-border-muted: #fde68a;
+  --app-header-start: #fffbeb;
+  --app-header-end: #fef3c7;
+  --app-toolbar-bg: #fffbeb;
+  --app-tabs-strip: #fef3c7;
+  --app-tab-inactive: #fffbeb;
+  --app-shell-bg: #fde68a;
+  --app-aside-bg: #fffbeb;
+  --app-aside-header: #fef3c7;
+  --app-work-bg: #fffbeb;
+  --app-footer-bg: #fef3c7;
+  --app-home-btn-border: rgba(180, 83, 9, 0.45);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.95);
+}
+
+html[data-app-theme="teal"] {
+  --app-border-strong: #5eead4;
+  --app-border-muted: #99f6e4;
+  --app-header-start: #f0fdfa;
+  --app-header-end: #ccfbf1;
+  --app-toolbar-bg: #f0fdfa;
+  --app-tabs-strip: #ccfbf1;
+  --app-tab-inactive: #f0fdfa;
+  --app-shell-bg: #99f6e4;
+  --app-aside-bg: #f0fdfa;
+  --app-aside-header: #ccfbf1;
+  --app-work-bg: #ecfdf5;
+  --app-footer-bg: #ccfbf1;
+  --app-home-btn-border: rgba(13, 148, 136, 0.45);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.95);
+}
+
+html[data-app-theme="indigo"] {
+  --app-border-strong: #a5b4fc;
+  --app-border-muted: #c7d2fe;
+  --app-header-start: #eef2ff;
+  --app-header-end: #e0e7ff;
+  --app-toolbar-bg: #f5f7ff;
+  --app-tabs-strip: #e0e7ff;
+  --app-tab-inactive: #f8fafc;
+  --app-shell-bg: #c7d2fe;
+  --app-aside-bg: #eef2ff;
+  --app-aside-header: #e0e7ff;
+  --app-work-bg: #f5f7ff;
+  --app-footer-bg: #e0e7ff;
+  --app-home-btn-border: rgba(67, 56, 202, 0.45);
+  --app-home-btn-bg: rgba(255, 255, 255, 0.95);
+}
+
+html[data-ui-compact="true"] {
+  --app-aside-width: 200px;
+  --app-main-pad: 0.5rem;
+  --app-main-pad-sm: 0.75rem;
+  --app-card-pad: 1rem;
+  --app-card-pad-sm: 1.25rem;
+}
+
+html[data-ui-compact="false"],
+html:not([data-ui-compact]) {
+  --app-aside-width: 220px;
+  --app-main-pad: 0.75rem;
+  --app-main-pad-sm: 1rem;
+  --app-card-pad: 1.25rem;
+  --app-card-pad-sm: 1.5rem;
 }
 
 @theme inline {
@@ -12,15 +219,28 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+input,
+select,
+textarea {
+  color: #18181b;
+  background-color: #ffffff;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #71717a;
 }
