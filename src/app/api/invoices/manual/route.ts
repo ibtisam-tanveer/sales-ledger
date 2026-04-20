@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { formatPounds } from "@/lib/format/money";
+import { formatPounds, roundMoney2 } from "@/lib/format/money";
 import { connectDb } from "@/lib/db/connect";
 import { Customer } from "@/lib/models/customer";
 import { Invoice } from "@/lib/models/invoice";
@@ -115,7 +115,8 @@ export async function POST(req: Request) {
       ];
     }
 
-    const math = validateInvoiceMath(lines, amountNet, amountVat, amountGross);
+    const grossRounded = roundMoney2(amountNet + amountVat);
+    const math = validateInvoiceMath(lines, amountNet, amountVat, grossRounded);
     if (!math.linesMatchNet || !math.netVatMatchGross) {
       return NextResponse.json(
         {
@@ -129,6 +130,22 @@ export async function POST(req: Request) {
     const siteTrimmed =
       typeof body.siteAddress === "string" ? body.siteAddress.trim() : "";
 
+    const postToLedger = body.postToLedger === true;
+    if (postToLedger) {
+      const dup = await Invoice.findOne({
+        customerId,
+        invoiceNumber,
+        status: { $ne: "draft" },
+        ...workspaceScopeOrLegacy(workspaceId),
+      });
+      if (dup) {
+        return NextResponse.json(
+          { error: "Invoice number already saved for this customer" },
+          { status: 409 }
+        );
+      }
+    }
+
     const inv = await Invoice.create({
       workspaceId,
       customerId,
@@ -140,8 +157,9 @@ export async function POST(req: Request) {
       currency: "GBP",
       amountNet,
       amountVat,
-      amountGross,
-      status: "draft",
+      amountGross: grossRounded,
+      status: postToLedger ? "open" : "draft",
+      postedAt: postToLedger ? new Date() : undefined,
       pdfStoredPath: "",
       pdfOriginalName: "",
       rawExtraction: { manual: true, createdAt: new Date().toISOString() },

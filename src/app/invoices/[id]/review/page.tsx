@@ -6,6 +6,7 @@ import { addDays, format, parseISO } from "date-fns";
 import { formatAmountForInput, parseAmountInput } from "@/lib/format/money";
 import { validateInvoiceMath } from "@/lib/validation/invoice-math";
 import { invoiceCalendarDayKeyLondon } from "@/lib/format/dates";
+import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 
 const VAT_RATE = 0.2;
 /** Default payment terms when issue date changes (due date stays editable). */
@@ -34,11 +35,14 @@ type Invoice = {
   amountVat: number;
   amountGross: number;
   customerId: string;
+  customerName?: string;
   status: string;
   lines: Line[];
   allocatedGross?: number;
   hasPdf?: boolean;
 };
+
+type CustomerOpt = { _id: string; name: string };
 
 export default function ReviewInvoicePage() {
   const params = useParams();
@@ -46,7 +50,10 @@ export default function ReviewInvoicePage() {
   const id = params.id as string;
   const [inv, setInv] = useState<Invoice | null>(null);
   const [err, setErr] = useState("");
+  const [customers, setCustomers] = useState<CustomerOpt[]>([]);
+  const [customersLoadErr, setCustomersLoadErr] = useState("");
 
+  const [customerId, setCustomerId] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [poNumber, setPoNumber] = useState("");
   const [siteAddress, setSiteAddress] = useState("");
@@ -71,7 +78,24 @@ export default function ReviewInvoicePage() {
   }, [id]);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await fetch("/api/customers");
+      const d = await r.json();
+      if (!r.ok) {
+        if (!cancelled) setCustomersLoadErr(typeof d.error === "string" ? d.error : "Could not load customers");
+        return;
+      }
+      if (!cancelled && Array.isArray(d)) setCustomers(d);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!inv) return;
+    setCustomerId(inv.customerId ?? "");
     setInvoiceNumber(inv.invoiceNumber);
     setPoNumber(inv.poNumber ?? "");
     setSiteAddress(inv.siteAddress);
@@ -115,10 +139,15 @@ export default function ReviewInvoicePage() {
   async function handleSave() {
     if (!inv) return;
     setErr("");
+    if (!customerId.trim()) {
+      setErr("Choose a customer.");
+      return;
+    }
     setSaving(true);
     try {
       const merged: Invoice = {
         ...inv,
+        customerId,
         invoiceNumber,
         poNumber,
         siteAddress,
@@ -147,6 +176,7 @@ export default function ReviewInvoicePage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          customerId,
           invoiceNumber,
           poNumber,
           siteAddress,
@@ -243,6 +273,34 @@ export default function ReviewInvoicePage() {
         </p>
         {err ? <p className="text-sm text-red-600">{err}</p> : null}
         <div className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm text-sm text-zinc-900">
+          <label className="grid min-w-0 gap-1 font-medium text-zinc-800">
+            <span>Customer</span>
+            <span className="text-xs font-normal text-zinc-500">
+              Link this invoice to a customer — compare with the PDF; use Save changes to apply
+            </span>
+            {customersLoadErr ? (
+              <span className="text-xs font-normal text-red-600">{customersLoadErr}</span>
+            ) : null}
+            <select
+              required
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              className="w-full min-w-0 max-w-full rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900"
+            >
+              <option value="">Select…</option>
+              {inv.customerId &&
+              !customers.some((c) => c._id === inv.customerId) ? (
+                <option value={inv.customerId}>
+                  {inv.customerName?.trim() || "Current customer"} (linked)
+                </option>
+              ) : null}
+              {customers.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="grid gap-1 font-medium text-zinc-800">
             Invoice number
             <input
@@ -273,6 +331,7 @@ export default function ReviewInvoicePage() {
               type="date"
               className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900"
               value={issueDate}
+              onFocus={selectDateInputOnFocus}
               onChange={(e) => {
                 const v = e.target.value;
                 setIssueDate(v);
@@ -289,46 +348,54 @@ export default function ReviewInvoicePage() {
               type="date"
               className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900"
               value={dueDate}
+              onFocus={selectDateInputOnFocus}
               onChange={(e) => setDueDate(e.target.value)}
             />
           </label>
-          <div className="grid grid-cols-3 gap-2">
-            <label className="grid gap-1 font-medium text-zinc-800">
-              Net (£)
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-2">
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-800">Net (£)</span>
+              {/* Same vertical space as VAT/Gross hints so inputs share one baseline */}
+              <div className="min-h-[2.5rem] text-xs leading-snug text-zinc-500 sm:min-h-[2.75rem]" />
               <input
+                id="review-net"
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
-                className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900 tabular-nums"
+                className="w-full min-w-0 rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900 tabular-nums"
                 value={formatAmountForInput(amountNet)}
                 onChange={(e) => onNetChange(e.target.value)}
               />
-            </label>
-            <label className="grid gap-1">
-              <span className="font-medium text-zinc-800">VAT (£)</span>
-              <span className="text-xs font-normal text-zinc-500">
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-800">VAT (£)</span>
+              <p className="min-h-[2.5rem] text-xs leading-snug text-zinc-500 sm:min-h-[2.75rem]">
                 20% of net when net changes — editable
-              </span>
+              </p>
               <input
+                id="review-vat"
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
-                className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900 tabular-nums"
+                className="w-full min-w-0 rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900 tabular-nums"
                 value={formatAmountForInput(amountVat)}
                 onChange={(e) => onVatChange(e.target.value)}
               />
-            </label>
-            <label className="grid gap-1">
-              <span className="font-medium text-zinc-800">Gross (£)</span>
-              <span className="text-xs font-normal text-zinc-500">Net + VAT (automatic)</span>
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-800">Gross (£)</span>
+              <p className="min-h-[2.5rem] text-xs leading-snug text-zinc-500 sm:min-h-[2.75rem]">
+                Net + VAT (automatic)
+              </p>
               <input
+                id="review-gross"
                 type="text"
                 readOnly
                 tabIndex={-1}
-                className="cursor-not-allowed rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-zinc-800 tabular-nums"
+                className="w-full min-w-0 cursor-not-allowed rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-zinc-800 tabular-nums"
                 value={formatAmountForInput(amountGross)}
               />
-            </label>
+            </div>
           </div>
 
           <div className="pt-1">

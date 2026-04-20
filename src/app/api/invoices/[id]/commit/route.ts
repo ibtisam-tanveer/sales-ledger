@@ -61,6 +61,7 @@ export async function POST(
 
     inv.amountGross = roundMoney2(inv.amountNet + inv.amountVat);
     inv.status = "open";
+    inv.postedAt = new Date();
     await inv.save();
 
     // Best-effort: once committed, delete the stored PDF to save space.

@@ -9,6 +9,7 @@ import { usePersistedPageState } from "@/hooks/usePersistedPageState";
 import { computeStatementTotals } from "@/lib/statements/statement-math";
 import type { StatementRow } from "@/lib/statement-pdf/statement-document";
 import { ReportPreviewDialog } from "@/components/ReportPreviewDialog";
+import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 
 type Customer = { _id: string; name: string };
 
@@ -144,6 +145,7 @@ function StatementsInner() {
             type="date"
             className="rounded border border-slate-300 bg-white px-2 py-2 text-slate-900"
             value={asOf}
+            onFocus={selectDateInputOnFocus}
             onChange={(e) => setDraft((d) => ({ ...d, asOf: e.target.value }))}
           />
         </label>

@@ -96,6 +96,7 @@ async function importOneRow(
     amountVat: row.amountVat,
     amountGross: row.amountGross,
     status: row.status,
+    postedAt: row.status === "draft" ? undefined : new Date(),
     pdfStoredPath: "",
     pdfOriginalName: "",
     rawExtraction: {

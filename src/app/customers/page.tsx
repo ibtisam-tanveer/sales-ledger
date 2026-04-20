@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePersistedPageState } from "@/hooks/usePersistedPageState";
+import { formatPounds } from "@/lib/format/money";
 
 type Customer = {
   _id: string;
@@ -13,6 +14,8 @@ type Customer = {
 
 export default function CustomersPage() {
   const [list, setList] = useState<Customer[]>([]);
+  const [balances, setBalances] = useState<Record<string, number>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const initialDraft = useMemo(
     () => ({
       name: "",
@@ -57,9 +60,17 @@ export default function CustomersPage() {
   }, [list, searchTerms]);
 
   async function load() {
-    const r = await fetch("/api/customers", { cache: "no-store" });
-    const d = await r.json();
-    if (r.ok && Array.isArray(d)) setList(d);
+    const [custR, balR] = await Promise.all([
+      fetch("/api/customers", { cache: "no-store" }),
+      fetch("/api/customers/balances", { cache: "no-store" }),
+    ]);
+    const d = await custR.json();
+    if (custR.ok && Array.isArray(d)) setList(d);
+
+    const b = await balR.json().catch(() => ({}));
+    if (balR.ok && b && typeof b === "object" && "balances" in b) {
+      setBalances((b as { balances: Record<string, number> }).balances ?? {});
+    }
   }
 
   useEffect(() => {
@@ -327,46 +338,84 @@ export default function CustomersPage() {
               </div>
             ) : (
               <>
-                <div className="min-w-0 flex-1">
-                  <span className="font-medium text-slate-900">{c.name}</span>
-                  {c.billingAddress ? (
-                    <p className="mt-1 whitespace-pre-wrap text-slate-600">
-                      {c.billingAddress}
-                    </p>
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() =>
+                    setExpanded((prev) => ({ ...prev, [c._id]: !prev[c._id] }))
+                  }
+                  aria-expanded={!!expanded[c._id]}
+                >
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="truncate font-medium text-slate-900">
+                      {c.name}
+                    </span>
+                    {typeof balances[c._id] === "number" ? (
+                      <Link
+                        href={`/reports/ledger?customerId=${encodeURIComponent(c._id)}`}
+                        className="shrink-0 tabular-nums font-medium text-neutral-800 hover:underline"
+                        title="View customer activity (ledger)"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {formatPounds(balances[c._id] ?? 0)}
+                      </Link>
+                    ) : (
+                      <span className="shrink-0 tabular-nums text-slate-800">—</span>
+                    )}
+                  </div>
+                  {expanded[c._id] ? (
+                    <div className="mt-1">
+                      {c.billingAddress ? (
+                        <p className="whitespace-pre-wrap text-slate-600">
+                          {c.billingAddress}
+                        </p>
+                      ) : (
+                        <p className="text-slate-500">No billing address saved.</p>
+                      )}
+                      {c.externalRef ? (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Ref: {c.externalRef}
+                        </p>
+                      ) : null}
+                      <Link
+                        href={`/statements?customerId=${c._id}`}
+                        className="mt-2 inline-block text-sm font-medium text-neutral-800 hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Statement
+                      </Link>
+                    </div>
                   ) : null}
-                  {c.externalRef ? (
-                    <p className="mt-1 text-xs text-slate-500">Ref: {c.externalRef}</p>
-                  ) : null}
-                  <Link
-                    href={`/statements?customerId=${c._id}`}
-                    className="mt-2 inline-block text-sm font-medium text-neutral-800 hover:underline"
+                </button>
+                <div className="flex shrink-0 items-start gap-3 sm:pt-0.5">
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-neutral-800 hover:underline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDraft((d) => ({
+                        ...d,
+                        editingId: c._id,
+                        editName: c.name,
+                        editAddr: c.billingAddress ?? "",
+                        editRef: c.externalRef ?? "",
+                      }));
+                      setErr("");
+                    }}
                   >
-                    Statement
-                  </Link>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-red-700 hover:underline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void del(c._id, c.name);
+                    }}
+                  >
+                    Delete
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="shrink-0 text-sm font-medium text-neutral-800 hover:underline sm:pt-0.5"
-                  onClick={() => {
-                    setDraft((d) => ({
-                      ...d,
-                      editingId: c._id,
-                      editName: c.name,
-                      editAddr: c.billingAddress ?? "",
-                      editRef: c.externalRef ?? "",
-                    }));
-                    setErr("");
-                  }}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  className="shrink-0 text-sm font-medium text-red-700 hover:underline sm:pt-0.5"
-                  onClick={() => void del(c._id, c.name)}
-                >
-                  Delete
-                </button>
               </>
             )}
           </li>

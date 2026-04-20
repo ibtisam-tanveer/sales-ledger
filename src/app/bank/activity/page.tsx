@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatInvoiceDate, formatUiDate } from "@/lib/format/dates";
 import { formatAmountForInput, formatPounds, parseAmountInput } from "@/lib/format/money";
+import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 
 type Customer = { _id: string; name: string };
 
@@ -462,6 +463,7 @@ export default function BankActivityPage() {
                     required
                     className="rounded border border-slate-300 bg-white px-2 py-2 text-slate-900"
                     value={receivedAt}
+                    onFocus={selectDateInputOnFocus}
                     onChange={(e) => setReceivedAt(e.target.value)}
                   />
                 </label>

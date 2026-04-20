@@ -79,10 +79,12 @@ export async function computeLedgerReport(
   }
 
   for (const r of remittances) {
+    const payRef =
+      typeof r.reference === "string" ? r.reference.trim() : "";
     rawLines.push({
       kind: "payment",
       date: new Date(r.receivedAt).toISOString(),
-      ref: r.reference || r._id.toString(),
+      ref: payRef,
       amount: r.amountGross,
       remittanceId: r._id.toString(),
     });

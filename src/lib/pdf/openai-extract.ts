@@ -34,7 +34,8 @@ export async function extractInvoiceWithOpenAI(
   const client = new OpenAI({ apiKey: key });
   const sys = `You extract structured data from UK facility/cleaning service invoice text.
 Return ONLY valid JSON matching the schema. Dates: parse to ISO yyyy-MM-dd if possible else null.
-Amounts are decimal numbers in GBP. PO number empty string if absent.`;
+Amounts are decimal numbers in GBP. PO number empty string if absent.
+The PDF often has two separate columns labelled "Site" and "P.O. NUMBER": put ONLY the site/venue/address (and postcode) in siteAddress, and ONLY the purchase-order / job reference (e.g. 2.00.22.1169) in poNumber — never put the site name or address in poNumber.`;
 
   const user = `Extract from this invoice text:\n\n${pdfText.slice(0, 12000)}`;
 

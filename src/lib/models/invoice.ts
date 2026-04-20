@@ -17,6 +17,8 @@ const invoiceSchema = new Schema(
     invoiceNumber: { type: String, required: true, trim: true },
     poNumber: { type: String, default: "" },
     issueDate: { type: Date, required: true },
+    /** Set when the invoice first leaves draft (commit, or created posted). */
+    postedAt: { type: Date, required: false },
     dueDate: { type: Date, required: true },
     siteAddress: { type: String, default: "" },
     currency: { type: String, default: "GBP" },

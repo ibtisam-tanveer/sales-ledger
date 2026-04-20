@@ -52,17 +52,37 @@ export function WorkspaceTabsProvider({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [tabs, setTabs] = useState<WorkspaceTab[]>(loadTabs);
+  /** Empty on server + first client paint so SSR HTML matches (avoids hydration mismatch). */
+  const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
+  const [tabsReady, setTabsReady] = useState(false);
+
+  /** Once after mount: restore from localStorage and ensure current route is a tab. */
+  useEffect(() => {
+    const fromLs = loadTabs();
+    let next = fromLs;
+    if (pathname !== "/" && !fromLs.some((t) => t.href === pathname)) {
+      next = [
+        ...fromLs,
+        { href: pathname, label: navLabelForPath(pathname) },
+      ];
+    }
+    setTabs(next);
+    setTabsReady(true);
+    // Intentionally run once: pathname here is the initial URL for this session paint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
+    if (!tabsReady) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
     } catch {
       // ignore
     }
-  }, [tabs]);
+  }, [tabs, tabsReady]);
 
   useEffect(() => {
+    if (!tabsReady) return;
     if (pathname === "/") return;
     setTabs((prev) => {
       if (prev.some((t) => t.href === pathname)) return prev;
@@ -71,7 +91,7 @@ export function WorkspaceTabsProvider({
         { href: pathname, label: navLabelForPath(pathname) },
       ];
     });
-  }, [pathname]);
+  }, [pathname, tabsReady]);
 
   const closeTab = useCallback(
     (href: string) => {

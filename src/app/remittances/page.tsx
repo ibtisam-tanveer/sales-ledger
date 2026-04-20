@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatInvoiceDate, formatUiDate } from "@/lib/format/dates";
 import { formatAmountForInput, formatPounds, parseAmountInput } from "@/lib/format/money";
 import { usePersistedPageState } from "@/hooks/usePersistedPageState";
+import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 
 type Customer = { _id: string; name: string };
 type Bank = { accountLabel: string; bankName: string };
@@ -310,6 +311,7 @@ export default function RemittancesPage() {
                 type="date"
                 className="rounded border border-slate-300 bg-white px-2 py-2 text-slate-900"
                 value={receivedAt}
+                onFocus={selectDateInputOnFocus}
                 onChange={(e) =>
                   setDraft((d) => ({ ...d, receivedAt: e.target.value }))
                 }

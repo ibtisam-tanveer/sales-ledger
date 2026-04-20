@@ -24,6 +24,15 @@ export async function GET(
     if (!inv) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const allocated = await getTotalAllocatedForInvoice(id);
     const hasPdf = Boolean(inv.pdfStoredPath?.trim());
+    const customerDoc = inv.customerId
+      ? await Customer.findOne({
+          _id: inv.customerId,
+          ...workspaceScopeOrLegacy(workspaceId),
+        })
+          .select("name")
+          .lean()
+      : null;
+    const customerName = String(customerDoc?.name ?? "").trim();
     const { pdfStoredPath: _p, ...rest } = inv as Record<string, unknown> & {
       pdfStoredPath?: string;
     };
@@ -32,6 +41,7 @@ export async function GET(
     const vat = Number(inv.amountVat) || 0;
     return NextResponse.json({
       ...rest,
+      customerName,
       amountGross: roundMoney2(net + vat),
       allocatedGross: allocated,
       hasPdf,
@@ -102,6 +112,15 @@ export async function PATCH(
     await inv.save();
     const lean = inv.toObject();
     const hasPdf = Boolean(lean.pdfStoredPath?.trim());
+    const customerDocP = lean.customerId
+      ? await Customer.findOne({
+          _id: lean.customerId,
+          ...workspaceScopeOrLegacy(workspaceId),
+        })
+          .select("name")
+          .lean()
+      : null;
+    const customerName = String(customerDocP?.name ?? "").trim();
     const { pdfStoredPath: _p2, ...rest } = lean as Record<string, unknown> & {
       pdfStoredPath?: string;
     };
@@ -111,6 +130,7 @@ export async function PATCH(
     const vatP = Number(lean.amountVat) || 0;
     return NextResponse.json({
       ...rest,
+      customerName,
       amountGross: roundMoney2(netP + vatP),
       allocatedGross: allocated,
       hasPdf,

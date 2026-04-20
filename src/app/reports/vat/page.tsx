@@ -8,6 +8,7 @@ import { usePersistedPageState } from "@/hooks/usePersistedPageState";
 import { buildVatCsv } from "@/lib/reports/vat-csv";
 import type { VatReportRow } from "@/lib/reports/vat-report";
 import { ReportPreviewDialog } from "@/components/ReportPreviewDialog";
+import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 
 export default function VatReportPage() {
   const initialDraft = useMemo(
@@ -88,6 +89,7 @@ export default function VatReportPage() {
             type="date"
             className="rounded border px-2 py-1"
             value={from}
+            onFocus={selectDateInputOnFocus}
             onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))}
           />
         </label>
@@ -97,6 +99,7 @@ export default function VatReportPage() {
             type="date"
             className="rounded border px-2 py-1"
             value={to}
+            onFocus={selectDateInputOnFocus}
             onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))}
           />
         </label>

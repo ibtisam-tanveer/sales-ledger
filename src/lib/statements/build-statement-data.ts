@@ -37,9 +37,10 @@ export async function buildStatementData(
 
   const asOfEnd = endOfDay(statementDate);
 
+  /** Outstanding sales only: unpaid (`open`) or partly allocated (`partially_paid`). Excludes drafts and fully-paid rows (`paid`). */
   const invoices = await Invoice.find({
     customerId,
-    status: { $ne: "draft" },
+    status: { $in: ["open", "partially_paid"] },
     issueDate: { $lte: asOfEnd },
     ...workspaceScopeOrLegacy(workspaceId),
   })

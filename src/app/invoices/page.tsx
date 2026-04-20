@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { InvoiceImportTemplate } from "@/lib/company-settings/invoice-import-template";
 import { INVOICE_IMPORT_PREFERRED_TEMPLATE_KEY } from "@/lib/ui/invoice-import-pref";
 import { formatInvoiceDate } from "@/lib/format/dates";
 import { formatPounds } from "@/lib/format/money";
+import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 
 type Inv = {
   _id: string;
@@ -13,13 +14,186 @@ type Inv = {
   customerName: string;
   invoiceNumber: string;
   issueDate: string;
+  /** ISO string when posted; null for drafts and legacy rows. */
+  postedAt: string | null;
   status: string;
+  amountNet: number;
+  amountVat: number;
   amountGross: number;
   siteAddress?: string;
   hasPdf?: boolean;
 };
 
 type CustomerRow = { _id: string; name: string };
+
+type InvoiceSortKey =
+  | "issueDate"
+  | "postedAt"
+  | "invoiceNumber"
+  | "customerName"
+  | "siteAddress"
+  | "status"
+  | "amountGross";
+
+type AmountBounds =
+  | { kind: "ok"; min?: number; max?: number }
+  | { kind: "invalid" }
+  | { kind: "range" };
+
+function amountBounds(fromStr: string, toStr: string): AmountBounds {
+  const parse = (s: string) => {
+    const t = s.trim();
+    if (t === "") return { ok: true as const, v: undefined as number | undefined };
+    const n = parseFloat(t.replace(/[£,\s]/g, ""));
+    return Number.isFinite(n)
+      ? { ok: true as const, v: n }
+      : { ok: false as const };
+  };
+  const a = parse(fromStr);
+  const b = parse(toStr);
+  if (!a.ok || !b.ok) return { kind: "invalid" };
+  if (a.v !== undefined && b.v !== undefined && a.v > b.v) return { kind: "range" };
+  return { kind: "ok", min: a.v, max: b.v };
+}
+
+const invFilterControlClass =
+  "w-full min-w-0 rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-900 shadow-sm placeholder:text-slate-400";
+
+function InvoiceSortableTh(props: {
+  label: string;
+  sortKeyName: InvoiceSortKey;
+  activeKey: InvoiceSortKey;
+  sortDir: "asc" | "desc";
+  onSort: (key: InvoiceSortKey) => void;
+  align?: "left" | "right";
+}) {
+  const {
+    label,
+    sortKeyName,
+    activeKey,
+    sortDir,
+    onSort,
+    align = "left",
+  } = props;
+  const active = activeKey === sortKeyName;
+  return (
+    <th
+      className={`border-b border-slate-200 bg-slate-100 px-2 py-2 text-sm font-semibold leading-snug ${align === "right" ? "text-right" : "text-left"}`}
+      aria-sort={
+        active ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+      }
+    >
+      <div className={align === "right" ? "flex justify-end" : undefined}>
+        <button
+          type="button"
+          onClick={() => onSort(sortKeyName)}
+          className="inline-flex max-w-full items-center gap-1 rounded-md px-0.5 py-0.5 text-left font-semibold hover:bg-slate-200/90"
+        >
+          {label}
+          <span className="font-normal text-slate-500" aria-hidden>
+            {active ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+          </span>
+        </button>
+      </div>
+    </th>
+  );
+}
+
+function InvoiceFilterTh(props: {
+  children?: ReactNode;
+  align?: "left" | "right";
+}) {
+  const { children, align = "left" } = props;
+  return (
+    <th
+      className={`align-middle border-b border-slate-200 bg-slate-50 px-2 py-1.5 font-normal ${align === "right" ? "text-right" : "text-left"}`}
+    >
+      {children}
+    </th>
+  );
+}
+
+function DateRangeFilter(props: {
+  from: string;
+  to: string;
+  onFrom: (v: string) => void;
+  onTo: (v: string) => void;
+  fromAria: string;
+  toAria: string;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="w-7 shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          From
+        </span>
+        <input
+          type="date"
+          aria-label={props.fromAria}
+          className={invFilterControlClass}
+          value={props.from}
+          onFocus={selectDateInputOnFocus}
+          onChange={(e) => props.onFrom(e.target.value)}
+        />
+      </div>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="w-7 shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          To
+        </span>
+        <input
+          type="date"
+          aria-label={props.toAria}
+          className={invFilterControlClass}
+          value={props.to}
+          onFocus={selectDateInputOnFocus}
+          onChange={(e) => props.onTo(e.target.value)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function AmountRangeFilter(props: {
+  from: string;
+  to: string;
+  onFrom: (v: string) => void;
+  onTo: (v: string) => void;
+  fromAria: string;
+  toAria: string;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="w-7 shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          From
+        </span>
+        <input
+          type="text"
+          inputMode="decimal"
+          aria-label={props.fromAria}
+          placeholder="£0"
+          className={invFilterControlClass}
+          value={props.from}
+          onChange={(e) => props.onFrom(e.target.value)}
+        />
+      </div>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="w-7 shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          To
+        </span>
+        <input
+          type="text"
+          inputMode="decimal"
+          aria-label={props.toAria}
+          placeholder="£0"
+          className={invFilterControlClass}
+          value={props.to}
+          onChange={(e) => props.onTo(e.target.value)}
+        />
+      </div>
+    </div>
+  );
+}
 
 const statusStyle: Record<string, string> = {
   draft: "bg-neutral-100 text-neutral-900 border-neutral-300",
@@ -28,11 +202,25 @@ const statusStyle: Record<string, string> = {
   paid: "bg-neutral-300 text-neutral-900 border-neutral-500",
 };
 
+function normalizeInvoiceRows(raw: unknown): Inv[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => {
+    const r = x as Inv;
+    return {
+      ...r,
+      postedAt: r.postedAt ?? null,
+      amountNet: Number(r.amountNet) || 0,
+      amountVat: Number(r.amountVat) || 0,
+      amountGross: Number(r.amountGross) || 0,
+    };
+  });
+}
+
 function reloadInvoices(setRows: (rows: Inv[]) => void) {
   fetch("/api/invoices")
     .then((r) => r.json())
     .then((invoices) => {
-      setRows(Array.isArray(invoices) ? invoices : []);
+      setRows(normalizeInvoiceRows(invoices));
     });
 }
 
@@ -46,6 +234,17 @@ export default function InvoiceRegisterPage() {
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [sortKey, setSortKey] = useState<InvoiceSortKey>("issueDate");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [filterCustomerId, setFilterCustomerId] = useState("");
+  const [issueDateFrom, setIssueDateFrom] = useState("");
+  const [issueDateTo, setIssueDateTo] = useState("");
+  const [postingDateFrom, setPostingDateFrom] = useState("");
+  const [postingDateTo, setPostingDateTo] = useState("");
+  const [filterInvoiceNo, setFilterInvoiceNo] = useState("");
+  const [filterSite, setFilterSite] = useState("");
+  const [grossFrom, setGrossFrom] = useState("");
+  const [grossTo, setGrossTo] = useState("");
   const [importTemplates, setImportTemplates] = useState<InvoiceImportTemplate[]>([]);
   const [importBusy, setImportBusy] = useState(false);
   const [importMsg, setImportMsg] = useState("");
@@ -58,7 +257,7 @@ export default function InvoiceRegisterPage() {
       fetch("/api/customers").then((r) => r.json()),
       fetch("/api/company-settings").then((r) => r.json()),
     ]).then(([invoices, custs, settings]) => {
-      setRows(Array.isArray(invoices) ? invoices : []);
+      setRows(normalizeInvoiceRows(invoices));
       setCustomers(Array.isArray(custs) ? custs : []);
       const t = (settings as { invoiceImportTemplates?: InvoiceImportTemplate[] })
         .invoiceImportTemplates;
@@ -192,6 +391,79 @@ export default function InvoiceRegisterPage() {
       ? rows
       : rows.filter((r) => r.status === filter);
 
+  const issueDateRangeInvalid =
+    !!issueDateFrom &&
+    !!issueDateTo &&
+    issueDateFrom > issueDateTo;
+
+  const postingDateRangeInvalid =
+    !!postingDateFrom &&
+    !!postingDateTo &&
+    postingDateFrom > postingDateTo;
+
+  const narrowed = useMemo(() => {
+    let r = filtered;
+    if (filterCustomerId) {
+      r = r.filter((x) => x.customerId === filterCustomerId);
+    }
+    if (!issueDateRangeInvalid) {
+      const from = issueDateFrom.trim();
+      const to = issueDateTo.trim();
+      if (from || to) {
+        r = r.filter((inv) => {
+          const k = inv.issueDate?.slice(0, 10) ?? "";
+          if (from && k < from) return false;
+          if (to && k > to) return false;
+          return true;
+        });
+      }
+    }
+    if (!postingDateRangeInvalid) {
+      const from = postingDateFrom.trim();
+      const to = postingDateTo.trim();
+      if (from || to) {
+        r = r.filter((inv) => {
+          const k = inv.postedAt?.slice(0, 10) ?? "";
+          if (!k) return false;
+          if (from && k < from) return false;
+          if (to && k > to) return false;
+          return true;
+        });
+      }
+    }
+    const invNoQ = filterInvoiceNo.trim().toLowerCase();
+    if (invNoQ) {
+      r = r.filter((inv) => inv.invoiceNumber.toLowerCase().includes(invNoQ));
+    }
+    const siteQ = filterSite.trim().toLowerCase();
+    if (siteQ) {
+      r = r.filter((inv) => (inv.siteAddress ?? "").toLowerCase().includes(siteQ));
+    }
+    const grossB = amountBounds(grossFrom, grossTo);
+    if (grossB.kind === "ok") {
+      r = r.filter((inv) => {
+        const v = inv.amountGross;
+        if (grossB.min !== undefined && v < grossB.min) return false;
+        if (grossB.max !== undefined && v > grossB.max) return false;
+        return true;
+      });
+    }
+    return r;
+  }, [
+    filtered,
+    filterCustomerId,
+    issueDateFrom,
+    issueDateTo,
+    issueDateRangeInvalid,
+    postingDateFrom,
+    postingDateTo,
+    postingDateRangeInvalid,
+    filterInvoiceNo,
+    filterSite,
+    grossFrom,
+    grossTo,
+  ]);
+
   const searchTerms = useMemo(
     () =>
       search
@@ -203,8 +475,8 @@ export default function InvoiceRegisterPage() {
   );
 
   const filtered2 = useMemo(() => {
-    if (searchTerms.length === 0) return filtered;
-    return filtered.filter((r) => {
+    if (searchTerms.length === 0) return narrowed;
+    return narrowed.filter((r) => {
       const hay = [
         r.invoiceNumber,
         r.customerName ?? "",
@@ -212,20 +484,114 @@ export default function InvoiceRegisterPage() {
         r.status,
         r.issueDate?.slice(0, 10) ?? "",
         formatInvoiceDate(r.issueDate),
+        r.postedAt?.slice(0, 10) ?? "",
+        r.postedAt ? formatInvoiceDate(r.postedAt) : "",
+        String(r.amountNet ?? ""),
+        String(r.amountVat ?? ""),
         String(r.amountGross ?? ""),
       ]
         .join(" ")
         .toLowerCase();
       return searchTerms.every((t) => hay.includes(t));
     });
-  }, [filtered, searchTerms]);
+  }, [narrowed, searchTerms]);
+
+  const sortedRows = useMemo(() => {
+    const rows = [...filtered2];
+    const dir = sortDir === "asc" ? 1 : -1;
+    rows.sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "issueDate":
+          cmp =
+            new Date(a.issueDate).getTime() - new Date(b.issueDate).getTime();
+          break;
+        case "postedAt": {
+          const ta = a.postedAt ? new Date(a.postedAt).getTime() : null;
+          const tb = b.postedAt ? new Date(b.postedAt).getTime() : null;
+          if (ta == null && tb == null) cmp = 0;
+          else if (ta == null) cmp = 1;
+          else if (tb == null) cmp = -1;
+          else cmp = ta - tb;
+          break;
+        }
+        case "amountGross":
+          cmp = Number(a.amountGross) - Number(b.amountGross);
+          break;
+        case "invoiceNumber":
+          cmp = a.invoiceNumber.localeCompare(b.invoiceNumber, undefined, {
+            numeric: true,
+          });
+          break;
+        case "customerName":
+          cmp = (a.customerName || "").localeCompare(b.customerName || "", undefined, {
+            sensitivity: "base",
+          });
+          break;
+        case "siteAddress":
+          cmp = (a.siteAddress || "").localeCompare(b.siteAddress || "", undefined, {
+            sensitivity: "base",
+          });
+          break;
+        case "status":
+          cmp = a.status.localeCompare(b.status);
+          break;
+        default:
+          break;
+      }
+      return cmp * dir;
+    });
+    return rows;
+  }, [filtered2, sortKey, sortDir]);
+
+  function cycleInvoiceSort(key: InvoiceSortKey) {
+    if (sortKey !== key) {
+      setSortKey(key);
+      const descDefault: InvoiceSortKey[] = ["issueDate", "postedAt", "amountGross"];
+      setSortDir(descDefault.includes(key) ? "desc" : "asc");
+      return;
+    }
+    setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+  }
+
+  function clearHeaderFilters() {
+    setFilterCustomerId("");
+    setIssueDateFrom("");
+    setIssueDateTo("");
+    setPostingDateFrom("");
+    setPostingDateTo("");
+    setFilterInvoiceNo("");
+    setFilterSite("");
+    setGrossFrom("");
+    setGrossTo("");
+    setFilter("all");
+  }
+
+  const grossAmtBounds = amountBounds(grossFrom, grossTo);
+
+  const amountFilterParseInvalid =
+    grossAmtBounds.kind === "invalid" &&
+    (grossFrom.trim() || grossTo.trim());
+
+  const headerFiltersActive =
+    !!filterCustomerId ||
+    !!issueDateFrom ||
+    !!issueDateTo ||
+    !!postingDateFrom ||
+    !!postingDateTo ||
+    !!filterInvoiceNo.trim() ||
+    !!filterSite.trim() ||
+    !!grossFrom.trim() ||
+    !!grossTo.trim() ||
+    filter !== "all";
 
   const selectedIdsInView = useMemo(() => {
-    const set = new Set(filtered2.map((r) => r._id));
+    const set = new Set(sortedRows.map((r) => r._id));
     return Object.keys(selected).filter((id) => selected[id] && set.has(id));
-  }, [filtered2, selected]);
+  }, [sortedRows, selected]);
 
-  const allSelectedInView = filtered2.length > 0 && selectedIdsInView.length === filtered2.length;
+  const allSelectedInView =
+    sortedRows.length > 0 && selectedIdsInView.length === sortedRows.length;
 
   async function deleteMany(ids: string[]) {
     if (ids.length === 0) return;
@@ -310,30 +676,6 @@ export default function InvoiceRegisterPage() {
           ) : null}
         </div>
       </div>
-      <div className="flex flex-wrap gap-2 text-sm">
-        {(
-          [
-            ["all", "All"],
-            ["draft", "Draft"],
-            ["open", "Open"],
-            ["partially_paid", "Part paid"],
-            ["paid", "Paid"],
-          ] as const
-        ).map(([v, label]) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setFilter(v)}
-            className={`rounded border px-3 py-1 ${
-              filter === v
-                ? "border-neutral-600 bg-neutral-600 text-white"
-                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
       <div className="rounded border border-slate-200 bg-white p-3 text-sm shadow-sm">
         <label className="grid gap-1 font-medium text-slate-800">
           Search invoices
@@ -346,7 +688,7 @@ export default function InvoiceRegisterPage() {
           />
           {searchTerms.length > 0 ? (
             <span className="text-xs font-normal text-slate-500">
-              Showing {filtered2.length} of {filtered.length} in this filter
+              Showing {sortedRows.length} of {narrowed.length} after filters
             </span>
           ) : null}
         </label>
@@ -387,47 +729,243 @@ export default function InvoiceRegisterPage() {
           {deleteErr}
         </p>
       ) : null}
+      {issueDateRangeInvalid ? (
+        <p className="text-sm text-red-600" role="alert">
+          Issue from must be on or before issue to (date filters in the table header are ignored
+          until fixed).
+        </p>
+      ) : null}
+      {postingDateRangeInvalid ? (
+        <p className="text-sm text-red-600" role="alert">
+          Posting from must be on or before posting to (posting date filters are ignored until
+          fixed).
+        </p>
+      ) : null}
+      {amountFilterParseInvalid ? (
+        <p className="text-sm text-red-600" role="alert">
+          Amount filters must be valid numbers (or left blank). Matching is paused until corrected.
+        </p>
+      ) : null}
+      {grossAmtBounds.kind === "range" ? (
+        <p className="text-sm text-red-600" role="alert">
+          Gross (£) from must be less than or equal to gross to (that range filter is ignored until
+          fixed).
+        </p>
+      ) : null}
+      {headerFiltersActive &&
+      !issueDateRangeInvalid &&
+      !postingDateRangeInvalid &&
+      !amountFilterParseInvalid ? (
+        <p className="text-xs text-slate-500">
+          {narrowed.length} invoice{narrowed.length === 1 ? "" : "s"} match the header filters
+          (of {rows.length} total).
+        </p>
+      ) : null}
       <div className="overflow-hidden rounded border border-slate-200 bg-white shadow-sm">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-100 text-left text-slate-700">
-              <th className="px-3 py-2 font-semibold">
-                <input
-                  type="checkbox"
-                  aria-label="Select all invoices in view"
-                  checked={allSelectedInView}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    setSelected((prev) => {
-                      const next = { ...prev };
-                      for (const r of filtered2) next[r._id] = on;
-                      return next;
-                    });
-                  }}
-                />
+        <table className="w-full table-fixed border-collapse text-sm">
+          <colgroup>
+            <col style={{ width: "3%" }} />
+            <col style={{ width: "7%" }} />
+            <col style={{ width: "7%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "26%" }} />
+            <col style={{ width: "22%" }} />
+            <col style={{ width: "7%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "9%" }} />
+          </colgroup>
+          <thead className="text-left text-slate-700">
+            <tr>
+              <th
+                rowSpan={2}
+                className="align-middle border-b border-slate-200 bg-slate-100 px-2 py-2 font-semibold"
+              >
+                <div className="flex flex-col items-stretch gap-2">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all invoices in view"
+                    checked={allSelectedInView}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setSelected((prev) => {
+                        const next = { ...prev };
+                        for (const r of sortedRows) next[r._id] = on;
+                        return next;
+                      });
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!headerFiltersActive}
+                    onClick={clearHeaderFilters}
+                    className="text-left text-xs font-medium leading-tight text-slate-600 underline decoration-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-40"
+                  >
+                    Clear filters
+                  </button>
+                </div>
               </th>
-              <th className="px-3 py-2 font-semibold">Date</th>
-              <th className="px-3 py-2 font-semibold">Invoice no.</th>
-              <th className="px-3 py-2 font-semibold">Customer (ledger)</th>
-              <th className="px-3 py-2 font-semibold">Site</th>
-              <th className="px-3 py-2 font-semibold">Status</th>
-              <th className="px-3 py-2 text-right font-semibold">Gross (£)</th>
-              <th className="px-3 py-2 font-semibold">Action</th>
+              <InvoiceSortableTh
+                label="Date"
+                sortKeyName="issueDate"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={cycleInvoiceSort}
+              />
+              <InvoiceSortableTh
+                label="Posted"
+                sortKeyName="postedAt"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={cycleInvoiceSort}
+              />
+              <InvoiceSortableTh
+                label="Inv no."
+                sortKeyName="invoiceNumber"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={cycleInvoiceSort}
+              />
+              <InvoiceSortableTh
+                label="Customer"
+                sortKeyName="customerName"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={cycleInvoiceSort}
+              />
+              <InvoiceSortableTh
+                label="Site"
+                sortKeyName="siteAddress"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={cycleInvoiceSort}
+              />
+              <InvoiceSortableTh
+                label="Status"
+                sortKeyName="status"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={cycleInvoiceSort}
+              />
+              <InvoiceSortableTh
+                label="Gross (£)"
+                sortKeyName="amountGross"
+                activeKey={sortKey}
+                sortDir={sortDir}
+                onSort={cycleInvoiceSort}
+                align="right"
+              />
+              <th
+                rowSpan={2}
+                className="align-middle border-b border-slate-200 bg-slate-100 px-2 py-2 font-semibold"
+              >
+                <span className="text-sm font-semibold leading-snug">Action</span>
+              </th>
+            </tr>
+            <tr>
+              <InvoiceFilterTh>
+                <DateRangeFilter
+                  from={issueDateFrom}
+                  to={issueDateTo}
+                  onFrom={setIssueDateFrom}
+                  onTo={setIssueDateTo}
+                  fromAria="Filter issue date from"
+                  toAria="Filter issue date to"
+                />
+              </InvoiceFilterTh>
+              <InvoiceFilterTh>
+                <DateRangeFilter
+                  from={postingDateFrom}
+                  to={postingDateTo}
+                  onFrom={setPostingDateFrom}
+                  onTo={setPostingDateTo}
+                  fromAria="Filter posting date from"
+                  toAria="Filter posting date to"
+                />
+              </InvoiceFilterTh>
+              <InvoiceFilterTh>
+                <input
+                  type="search"
+                  aria-label="Filter by invoice number"
+                  placeholder="Contains…"
+                  className={invFilterControlClass}
+                  value={filterInvoiceNo}
+                  onChange={(e) => setFilterInvoiceNo(e.target.value)}
+                />
+              </InvoiceFilterTh>
+              <InvoiceFilterTh>
+                <label className="sr-only" htmlFor="inv-filter-customer">
+                  Filter by customer
+                </label>
+                <select
+                  id="inv-filter-customer"
+                  className={invFilterControlClass}
+                  value={filterCustomerId}
+                  onChange={(e) => setFilterCustomerId(e.target.value)}
+                >
+                  <option value="">All customers</option>
+                  {customers.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </InvoiceFilterTh>
+              <InvoiceFilterTh>
+                <input
+                  type="search"
+                  aria-label="Filter by site"
+                  placeholder="Contains…"
+                  className={invFilterControlClass}
+                  value={filterSite}
+                  onChange={(e) => setFilterSite(e.target.value)}
+                />
+              </InvoiceFilterTh>
+              <InvoiceFilterTh>
+                <label className="sr-only" htmlFor="inv-filter-status">
+                  Filter by status
+                </label>
+                <select
+                  id="inv-filter-status"
+                  className={`${invFilterControlClass} capitalize`}
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                >
+                  <option value="all">All statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="open">Open</option>
+                  <option value="partially_paid">Part paid</option>
+                  <option value="paid">Paid</option>
+                </select>
+              </InvoiceFilterTh>
+              <InvoiceFilterTh align="right">
+                <AmountRangeFilter
+                  from={grossFrom}
+                  to={grossTo}
+                  onFrom={setGrossFrom}
+                  onTo={setGrossTo}
+                  fromAria="Filter gross amount from"
+                  toAria="Filter gross amount to"
+                />
+              </InvoiceFilterTh>
             </tr>
           </thead>
           <tbody>
-            {filtered2.length === 0 ? (
+            {sortedRows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
-                  {filtered.length === 0
-                    ? "No invoices match this filter."
-                    : "No invoices match your search."}
+                <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
+                  {rows.length === 0
+                    ? "No invoices yet."
+                    : filtered.length === 0
+                      ? "No invoices match this status."
+                      : narrowed.length === 0
+                        ? "No invoices match the current header filters."
+                        : "No invoices match your search."}
                 </td>
               </tr>
             ) : (
-              filtered2.map((r) => (
+              sortedRows.map((r) => (
                 <tr key={r._id} className="border-b border-slate-100 hover:bg-slate-50/80">
-                  <td className="px-3 py-2">
+                  <td className="align-top px-2 py-2">
                     <input
                       type="checkbox"
                       aria-label={`Select invoice ${r.invoiceNumber}`}
@@ -437,26 +975,40 @@ export default function InvoiceRegisterPage() {
                       }
                     />
                   </td>
-                  <td className="px-3 py-2 text-slate-800">
+                  <td className="align-top px-2 py-2 text-slate-800">
                     {formatInvoiceDate(r.issueDate)}
                   </td>
-                  <td className="px-3 py-2 font-medium text-slate-900">{r.invoiceNumber}</td>
-                  <td className="max-w-[220px] px-3 py-2 text-slate-800">
-                    <div className="flex flex-col gap-1.5">
-                      <span className="font-medium leading-snug">{r.customerName || "—"}</span>
-                      <label className="grid gap-0.5 text-[11px] font-normal text-slate-500">
-                        <span className="sr-only">Move invoice to customer ledger</span>
-                        {customers.length === 0 ? (
-                          <span className="text-amber-800">
-                            Add customers under{" "}
-                            <Link href="/customers" className="font-medium underline">
-                              Customer records
-                            </Link>
-                            .
-                          </span>
-                        ) : (
+                  <td className="align-top px-2 py-2 text-slate-800">
+                    {r.postedAt ? formatInvoiceDate(r.postedAt) : "—"}
+                  </td>
+                  <td className="align-top px-2 py-2 font-medium text-slate-900">
+                    {r.invoiceNumber}
+                  </td>
+                  <td className="min-w-0 align-top px-2 py-2 text-slate-800">
+                    <div className="min-w-0">
+                      <label className="sr-only" htmlFor={`cust-${r._id}`}>
+                        Customer (ledger)
+                      </label>
+                      {customers.length === 0 ? (
+                        <span className="text-xs leading-snug text-amber-800">
+                          Add customers under{" "}
+                          <Link href="/customers" className="font-medium underline">
+                            Customer records
+                          </Link>
+                          .
+                        </span>
+                      ) : (
+                        <>
+                          <p
+                            className="mb-1 text-sm font-medium leading-snug text-slate-900 break-words"
+                            title={r.customerName}
+                          >
+                            {r.customerName}
+                          </p>
                           <select
-                            className="max-w-full rounded border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-900"
+                            id={`cust-${r._id}`}
+                            className="w-full min-w-0 max-w-full rounded-md border border-slate-300 bg-white px-1.5 py-1 text-xs text-slate-900"
+                            title="Change customer ledger"
                             value={r.customerId}
                             onChange={(e) => void transferInvoice(r, e.target.value)}
                           >
@@ -469,30 +1021,35 @@ export default function InvoiceRegisterPage() {
                               </option>
                             ))}
                           </select>
-                        )}
-                      </label>
+                        </>
+                      )}
                     </div>
                   </td>
-                  <td className="max-w-[180px] truncate px-3 py-2 text-slate-600">
-                    {r.siteAddress || "—"}
+                  <td className="min-w-0 align-top px-2 py-2 text-slate-600">
+                    <p
+                      className="text-sm font-normal leading-snug break-words whitespace-pre-wrap"
+                      title={r.siteAddress || undefined}
+                    >
+                      {r.siteAddress?.trim() ? r.siteAddress : "—"}
+                    </p>
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="align-top px-2 py-2">
                     <span
-                      className={`inline-block rounded border px-2 py-0.5 text-xs font-medium capitalize ${
+                      className={`inline-block max-w-full rounded-md border px-2 py-0.5 text-xs font-medium capitalize ${
                         statusStyle[r.status] ?? "bg-slate-100 text-slate-800"
                       }`}
                     >
                       {r.status.replace("_", " ")}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-800">
+                  <td className="align-top px-2 py-2 text-right text-sm tabular-nums text-slate-800">
                     {formatPounds(Number(r.amountGross))}
                   </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <td className="align-top px-2 py-2">
+                    <div className="flex flex-col items-start gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-0.5">
                       <Link
                         href={`/invoices/${r._id}/review`}
-                        className="font-medium text-neutral-800 hover:underline"
+                        className="text-sm font-medium text-neutral-800 hover:underline"
                       >
                         {r.status === "draft" ? "Review" : "Edit"}
                       </Link>
@@ -501,19 +1058,19 @@ export default function InvoiceRegisterPage() {
                           href={`/api/invoices/${r._id}/pdf`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="font-medium text-neutral-800 hover:underline"
+                          className="text-sm font-medium text-neutral-800 hover:underline"
                         >
                           View PDF
                         </a>
                       ) : (
-                        <span className="text-slate-400">No PDF</span>
+                        <span className="text-sm text-slate-400">No PDF</span>
                       )}
                       {r.status === "draft" ? (
                         <button
                           type="button"
                           onClick={() => void deleteDraftInvoice(r)}
                           disabled={deleteBusyId === r._id}
-                          className="font-medium text-red-700 hover:underline disabled:opacity-50"
+                          className="text-sm font-medium text-red-700 hover:underline disabled:opacity-50"
                         >
                           {deleteBusyId === r._id ? "Deleting…" : "Delete"}
                         </button>
@@ -522,7 +1079,7 @@ export default function InvoiceRegisterPage() {
                           type="button"
                           onClick={() => void deleteDraftInvoice(r)}
                           disabled={deleteBusyId === r._id}
-                          className="font-medium text-red-700 hover:underline disabled:opacity-50"
+                          className="text-sm font-medium text-red-700 hover:underline disabled:opacity-50"
                         >
                           {deleteBusyId === r._id ? "Deleting…" : "Delete"}
                         </button>

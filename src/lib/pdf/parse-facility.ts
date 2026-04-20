@@ -50,45 +50,118 @@ export function parseFacilityInvoiceText(raw: string): ParsedInvoice {
   const dateMatch = text.match(/Date:\s*([^\n]+)/i);
   if (dateMatch) issueDate = parseUkDate(dateMatch[1]);
 
+  /**
+   * PO refs on Facility PDFs are usually dotted codes like 2.00.22.1169, or numeric-heavy.
+   * Do not treat plain words ("Castle", "Wharf") as POs — that was polluting the PO field
+   * when text wrapped onto two lines or when the fallback scanned the Site column.
+   */
   function looksLikePoNumber(s: string): boolean {
     const t = s.trim();
     if (!t) return false;
-    // Common patterns seen on these invoices: 2.00.22.1129, 200221129, PO-12345
-    if (/^[\d.]{6,}$/.test(t)) return true;
-    if (/^PO[\s\-]?\w{3,}$/i.test(t)) return true;
-    if (/^[A-Z0-9][A-Z0-9\-./]{4,}$/i.test(t)) return true;
+    // Facility layout: d.dd.dd.dddd+
+    if (/^\d{1,2}\.\d{1,2}\.\d{2}\.\d{3,}$/.test(t)) return true;
+    // Long digit / dot only (no letters)
+    if (/^[\d.]{8,}$/.test(t)) return true;
+    // Explicit PO prefix
+    if (/^PO[\s#\-]*[A-Z0-9]/i.test(t)) return true;
+    // Alphanumeric ref only if it contains a digit (avoids matching site names)
+    if (/[0-9]/.test(t) && /^[A-Z0-9][A-Z0-9\-./]{3,}$/i.test(t)) return true;
     return false;
+  }
+
+  /** Prefer stronger PO patterns when choosing among candidates. */
+  function poMatchStrength(s: string): number {
+    const t = s.trim();
+    if (/^\d{1,2}\.\d{1,2}\.\d{2}\.\d{3,}$/.test(t)) return 3;
+    if (/^[\d.]{8,}$/.test(t)) return 2;
+    if (/[0-9]/.test(t) && /^[A-Z0-9][A-Z0-9\-./]{3,}$/i.test(t)) return 1;
+    return 0;
   }
 
   let poNumber = "";
   let siteAddress = "";
 
-  // First, try to parse the "Site | P.O. NUMBER" table row where the values are on the next line.
-  const siteRow = text.match(
-    /(?:^|\n)Site\s+P\.?\s*O\.?\s*NUMBER\s*\n\s*([^\n]+)/i
-  );
-  if (siteRow) {
-    const line = siteRow[1].trim();
-    // Often the extracted text collapses columns into one line like:
-    // "56 Westminster    2.00.22.1129"
-    // Split on 2+ spaces (or tabs) to separate columns.
-    const parts = line.split(/\s{2,}|\t+/).map((p) => p.trim()).filter(Boolean);
-    if (parts.length >= 2) {
-      const candidatePo = parts[parts.length - 1];
-      const candidateSite = parts.slice(0, parts.length - 1).join(" ").trim();
-      if (candidateSite) siteAddress = candidateSite;
-      if (looksLikePoNumber(candidatePo)) poNumber = candidatePo;
-    } else {
-      // Some PDFs collapse columns with single spaces. Try: last token as PO.
-      const tokens = line.split(/\s+/).map((t) => t.trim()).filter(Boolean);
-      if (tokens.length >= 2) {
-        const candidatePo = tokens[tokens.length - 1];
-        const candidateSite = tokens.slice(0, tokens.length - 1).join(" ").trim();
-        if (candidateSite) siteAddress = candidateSite;
-        if (looksLikePoNumber(candidatePo)) poNumber = candidatePo;
+  /**
+   * Site + P.O. NUMBER often span multiple lines (site name, postcode, then PO on its own line).
+   * A regex that only read two lines dropped the real PO (e.g. 2.00.22.1176) and left "Three60"
+   * to be misclassified as the PO elsewhere.
+   */
+  const siteHeaderMatch = text.match(/(?:^|\n)Site\s+P\.?\s*O\.?\s*NUMBER\s*\n/i);
+  if (siteHeaderMatch && siteHeaderMatch.index !== undefined) {
+    const afterHeader = text.slice(siteHeaderMatch.index + siteHeaderMatch[0].length);
+    const rawLines = afterHeader.split("\n");
+    const valueLines: string[] = [];
+    const isStopLine = (t: string) =>
+      /^Invoice To:/i.test(t) ||
+      /^Date:/i.test(t) ||
+      /^Customer ID:/i.test(t) ||
+      /^Invoice no:/i.test(t) ||
+      /^Shift date\b/i.test(t) ||
+      /^Details\b/i.test(t) ||
+      /^Subtotal\b/i.test(t) ||
+      /^Total\b/i.test(t);
+
+    for (const raw of rawLines) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (isStopLine(line)) break;
+      valueLines.push(line);
+      if (valueLines.length >= 12) break;
+    }
+
+    if (valueLines.length === 1) {
+      const line = valueLines[0].trim();
+      const parts = line.split(/\s{2,}|\t+/).map((p) => p.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        const candidatePo = parts[parts.length - 1];
+        const candidateSite = parts.slice(0, parts.length - 1).join(" ").trim();
+        if (looksLikePoNumber(candidatePo)) {
+          poNumber = candidatePo;
+          siteAddress = candidateSite;
+        } else {
+          siteAddress = line;
+        }
       } else {
-        // If we didn't get a clean split, keep the full line as site.
-        siteAddress = line;
+        const tokens = line.split(/\s+/).map((t) => t.trim()).filter(Boolean);
+        if (tokens.length >= 2) {
+          const candidatePo = tokens[tokens.length - 1];
+          const candidateSite = tokens.slice(0, tokens.length - 1).join(" ").trim();
+          if (looksLikePoNumber(candidatePo)) {
+            poNumber = candidatePo;
+            siteAddress = candidateSite;
+          } else {
+            siteAddress = line;
+          }
+        } else {
+          siteAddress = line;
+        }
+      }
+    } else if (valueLines.length >= 2) {
+      let poLineIdx = -1;
+      for (let i = valueLines.length - 1; i >= 0; i--) {
+        if (looksLikePoNumber(valueLines[i])) {
+          poNumber = valueLines[i].trim();
+          poLineIdx = i;
+          break;
+        }
+      }
+      if (poLineIdx >= 0) {
+        siteAddress = valueLines.filter((_, i) => i !== poLineIdx).join(" ").trim();
+      } else {
+        const last = valueLines[valueLines.length - 1].trim();
+        const tokens = last.split(/\s+/).filter(Boolean);
+        if (tokens.length >= 2) {
+          const candidatePo = tokens[tokens.length - 1];
+          if (looksLikePoNumber(candidatePo)) {
+            poNumber = candidatePo;
+            const head = tokens.slice(0, -1).join(" ");
+            siteAddress = [...valueLines.slice(0, -1), head].join(" ").trim();
+          } else {
+            siteAddress = valueLines.join(" ").trim();
+          }
+        } else {
+          siteAddress = valueLines.join(" ").trim();
+        }
       }
     }
   }
@@ -104,30 +177,28 @@ export function parseFacilityInvoiceText(raw: string): ParsedInvoice {
     }
   }
 
-  // Last resort: walk the text line-by-line, find "P.O. NUMBER" header,
-  // then look at that line and the next few lines for a plausible PO value.
+  // Last resort: under "P.O. NUMBER" header, pick the best PO-shaped token (never pure site words).
   if (!poNumber) {
     const linesRaw = text.split("\n").map((l) => l.trim());
     const headerIdx = linesRaw.findIndex((l) => /P\.?\s*O\.?\s*NUMBER/i.test(l));
     if (headerIdx >= 0) {
       const window = linesRaw.slice(headerIdx, headerIdx + 6).filter(Boolean);
+      const candidates: string[] = [];
       for (const l of window) {
-        // If the extractor kept columns on the same line, the PO is often the last token.
         const tokens = l
+          .replace(/^Site\s+/i, "")
           .replace(/P\.?\s*O\.?\s*NUMBER/i, "")
           .split(/\s+/)
           .map((t) => t.trim())
           .filter(Boolean);
-        // Try last token first, then any token.
-        const candidates = [
-          tokens[tokens.length - 1],
-          ...tokens,
-        ].filter((x): x is string => typeof x === "string" && x.length > 0);
-        const found = candidates.find((c) => looksLikePoNumber(c));
-        if (found) {
-          poNumber = found;
-          break;
+        if (tokens.length) {
+          candidates.push(tokens[tokens.length - 1], ...tokens);
         }
+      }
+      const plausible = [...new Set(candidates)].filter(looksLikePoNumber);
+      plausible.sort((a, b) => poMatchStrength(b) - poMatchStrength(a));
+      if (plausible.length) {
+        poNumber = plausible[0];
       }
     }
   }

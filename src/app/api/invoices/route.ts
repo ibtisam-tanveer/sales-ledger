@@ -34,13 +34,19 @@ export async function GET(req: Request) {
         }
         const net = Number(doc.amountNet) || 0;
         const vat = Number(doc.amountVat) || 0;
+        const postedAt = doc.postedAt
+          ? new Date(doc.postedAt as Date).toISOString()
+          : null;
         return {
           _id: String(doc._id),
           customerId: customerIdStr,
           customerName,
           invoiceNumber: doc.invoiceNumber,
           issueDate: doc.issueDate,
+          postedAt,
           status: doc.status,
+          amountNet: roundMoney2(net),
+          amountVat: roundMoney2(vat),
           amountGross: roundMoney2(net + vat),
           siteAddress: doc.siteAddress ?? "",
           hasPdf: Boolean(doc.pdfStoredPath?.trim()),

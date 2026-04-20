@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatPounds, parseAmountInput } from "@/lib/format/money";
+import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 import { usePersistedPageState } from "@/hooks/usePersistedPageState";
 
 type Customer = { _id: string; name: string };
@@ -173,32 +174,36 @@ export default function NewManualInvoicePage() {
           amountNet: net,
           amountVat: round2(vat),
           amountGross: gross,
+          postToLedger: true,
         }),
       });
       const d = await r.json();
       if (!r.ok) {
         const extra =
           d.math?.messages?.length ? ` — ${d.math.messages.join(" ")}` : "";
-        setErr((d.error ?? "Could not create draft") + extra);
+        setErr((d.error ?? "Could not save invoice") + extra);
         return;
       }
-      router.push(`/invoices/${d.invoiceId}/review`);
+      router.push("/invoices");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="max-w-lg space-y-4">
+    <div className="max-w-lg min-w-0 space-y-4">
       <h1 className="text-xl font-semibold text-slate-900">New invoice (manual)</h1>
       <p className="text-sm text-slate-600">
-        Create a draft without a PDF — same review and commit steps as after an upload.
+        Enter details without a PDF — saves straight to your invoice list as posted (open).
       </p>
       {loadErr ? (
         <p className="text-sm text-red-600">{loadErr}</p>
       ) : null}
-      <form onSubmit={onSubmit} className="space-y-3 rounded-lg border bg-white p-4 shadow-sm">
-        <label className="grid gap-1 text-sm font-medium text-slate-800">
+      <form
+        onSubmit={onSubmit}
+        className="min-w-0 space-y-3 overflow-x-hidden rounded-lg border bg-white p-4 shadow-sm"
+      >
+        <label className="grid min-w-0 gap-1 text-sm font-medium text-slate-800">
           Customer
           <select
             required
@@ -206,7 +211,7 @@ export default function NewManualInvoicePage() {
             onChange={(e) =>
               setDraft((d) => ({ ...d, customerId: e.target.value }))
             }
-            className="rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-900"
+            className="w-full min-w-0 max-w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-900"
           >
             <option value="">Select…</option>
             {customers.map((c) => (
@@ -216,7 +221,7 @@ export default function NewManualInvoicePage() {
             ))}
           </select>
         </label>
-        <label className="grid gap-1 text-sm font-medium text-slate-800">
+        <label className="grid min-w-0 gap-1 text-sm font-medium text-slate-800">
           Invoice number
           <input
             required
@@ -226,20 +231,20 @@ export default function NewManualInvoicePage() {
             }
             placeholder="e.g. 1682/26"
             autoComplete="off"
-            className="rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-900"
+            className="w-full min-w-0 rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-900"
           />
         </label>
-        <label className="grid gap-1 text-sm font-medium text-slate-800">
+        <label className="grid min-w-0 gap-1 text-sm font-medium text-slate-800">
           PO number
           <input
             value={poNumber}
             onChange={(e) =>
               setDraft((d) => ({ ...d, poNumber: e.target.value }))
             }
-            className="rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-900"
+            className="w-full min-w-0 rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-900"
           />
         </label>
-        <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
           <div className="text-sm font-medium text-slate-800">
             Site address{" "}
             <span className="font-normal text-slate-500">
@@ -261,7 +266,7 @@ export default function NewManualInvoicePage() {
               siteBlurTimer.current = setTimeout(() => setSiteListOpen(false), 150);
             }}
             autoComplete="off"
-            className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-900"
+            className="w-full min-w-0 rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-900"
           />
           {/* In-flow list so it cannot paint over Net / VAT / Gross (absolute overlay bug). */}
           {siteListOpen && siteSuggestions.length > 0 ? (
@@ -296,6 +301,7 @@ export default function NewManualInvoicePage() {
               type="date"
               required
               value={issueDate}
+              onFocus={selectDateInputOnFocus}
               onChange={(e) => {
                 const v = e.target.value;
                 setDraft((d) => ({
@@ -313,6 +319,7 @@ export default function NewManualInvoicePage() {
               type="date"
               required
               value={dueDate}
+              onFocus={selectDateInputOnFocus}
               onChange={(e) =>
                 setDraft((d) => ({ ...d, dueDate: e.target.value }))
               }
@@ -386,7 +393,7 @@ export default function NewManualInvoicePage() {
           disabled={busy || !!loadErr}
           className="rounded bg-zinc-900 px-4 py-2 text-sm text-white disabled:opacity-50"
         >
-          {busy ? "Creating…" : "Create draft & review"}
+          {busy ? "Saving…" : "Save invoice"}
         </button>
       </form>
       <p className="text-sm text-slate-600">
