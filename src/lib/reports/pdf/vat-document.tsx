@@ -12,6 +12,13 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica",
     color: "#222",
   },
+  pageNumber: {
+    position: "absolute",
+    right: 32,
+    bottom: 14,
+    fontSize: 8,
+    color: "#666",
+  },
   title: { fontSize: 14, fontFamily: "Helvetica-Bold", marginBottom: 8 },
   meta: { fontSize: 9, color: "#555", marginBottom: 10, lineHeight: 1.3 },
   tableHead: {
@@ -62,6 +69,13 @@ export function VatPdfDocument(props: {
   return (
     <Document>
       <Page size="A4" style={styles.page}>
+        <Text
+          style={styles.pageNumber}
+          fixed
+          render={({ pageNumber, totalPages }) =>
+            `Page ${pageNumber} of ${totalPages}`
+          }
+        />
         <Text style={styles.title}>VAT summary / return data</Text>
         <Text style={styles.meta}>
           {range}

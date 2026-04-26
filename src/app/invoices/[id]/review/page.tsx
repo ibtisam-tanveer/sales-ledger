@@ -145,6 +145,7 @@ export default function ReviewInvoicePage() {
     }
     setSaving(true);
     try {
+      const isDraftNow = inv.status === "draft";
       const merged: Invoice = {
         ...inv,
         customerId,
@@ -166,11 +167,13 @@ export default function ReviewInvoicePage() {
         Number(merged.amountVat),
         Number(merged.amountGross)
       );
+      let forceCommit = false;
       if (m.messages.length > 0) {
         const ok = window.confirm(
           `Warning — totals look inconsistent:\n\n${m.messages.join("\n\n")}\n\nSave these values anyway?`
         );
         if (!ok) return;
+        forceCommit = true;
       }
       const r = await fetch(`/api/invoices/${id}`, {
         method: "PATCH",
@@ -194,6 +197,27 @@ export default function ReviewInvoicePage() {
         return;
       }
       setInv(d);
+
+      // If reviewing a draft, saving should also post/commit so the user doesn't need
+      // a separate commit step.
+      if (isDraftNow) {
+        const commitR = await fetch(`/api/invoices/${id}/commit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: forceCommit }),
+        });
+        const commitD = await commitR.json().catch(() => ({}));
+        if (!commitR.ok) {
+          const extra =
+            Array.isArray(commitD.math?.messages) && commitD.math.messages.length
+              ? ` — ${commitD.math.messages.join(" ")}`
+              : "";
+          setErr((commitD.error ?? "Commit failed") + extra);
+          await load();
+          return;
+        }
+        router.push("/invoices");
+      }
     } finally {
       setSaving(false);
     }
@@ -405,28 +429,11 @@ export default function ReviewInvoicePage() {
               className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
               onClick={() => void handleSave()}
             >
-              {saving ? "Saving…" : "Save changes"}
+              {saving ? "Saving…" : (isDraft ? "Save & commit" : "Save changes")}
             </button>
           </div>
         </div>
-        {isDraft ? (
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="rounded bg-zinc-900 px-4 py-2 text-sm text-white"
-              onClick={() => commit(false)}
-            >
-              Commit invoice
-            </button>
-            <button
-              type="button"
-              className="rounded border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-900"
-              onClick={() => commit(true)}
-            >
-              Commit anyway (ignore line checks)
-            </button>
-          </div>
-        ) : null}
+        {/* Draft invoices are committed as part of Save changes */}
       </div>
     </div>
   );

@@ -69,6 +69,21 @@ export async function buildStatementData(
     });
   }
 
+  // Ensure deterministic ordering: date first, then invoice number within the same date.
+  rows.sort((a, b) => {
+    const da = a.issueDate?.getTime?.() ?? 0;
+    const db = b.issueDate?.getTime?.() ?? 0;
+    if (da !== db) return da - db;
+    const ia = String(a.invoiceNumber ?? "").trim();
+    const ib = String(b.invoiceNumber ?? "").trim();
+    if (!ia && !ib) return 0;
+    if (!ia) return 1;
+    if (!ib) return -1;
+    if (ia === "—" && ib !== "—") return 1;
+    if (ib === "—" && ia !== "—") return -1;
+    return ia.localeCompare(ib, undefined, { numeric: true, sensitivity: "base" });
+  });
+
   const company: CompanyHeader = {
     legalName: companySettings.legalName ?? "",
     registeredAddress: companySettings.registeredAddress ?? "",

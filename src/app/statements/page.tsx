@@ -10,6 +10,7 @@ import { computeStatementTotals } from "@/lib/statements/statement-math";
 import type { StatementRow } from "@/lib/statement-pdf/statement-document";
 import { ReportPreviewDialog } from "@/components/ReportPreviewDialog";
 import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
+import { TablePagination } from "@/components/TablePagination";
 
 type Customer = { _id: string; name: string };
 
@@ -29,6 +30,7 @@ function StatementsInner() {
   const sp = useSearchParams();
   const pre = sp.get("customerId") ?? "";
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [pdfPreviewNonce, setPdfPreviewNonce] = useState(0);
   const defaultDraft = useMemo(
     () => ({
       customerId: "",
@@ -44,6 +46,8 @@ function StatementsInner() {
     useState<StatementDataJson | null>(null);
   const [excelPreviewErr, setExcelPreviewErr] = useState("");
   const [excelPreviewLoading, setExcelPreviewLoading] = useState(false);
+  const [excelPage, setExcelPage] = useState(1);
+  const [excelPageSize, setExcelPageSize] = useState(3);
 
   useEffect(() => {
     fetch("/api/customers", { cache: "no-store" })
@@ -59,8 +63,8 @@ function StatementsInner() {
 
   const pdfViewUrl = useMemo(() => {
     if (!customerId) return "";
-    return `/api/statements/${customerId}/pdf?asOf=${encodeURIComponent(asOf)}&mode=inline`;
-  }, [customerId, asOf]);
+    return `/api/statements/${customerId}/pdf?asOf=${encodeURIComponent(asOf)}&mode=inline&nonce=${pdfPreviewNonce}`;
+  }, [customerId, asOf, pdfPreviewNonce]);
 
   const pdfDownloadUrl = useMemo(() => {
     if (!customerId) return "";
@@ -73,6 +77,7 @@ function StatementsInner() {
   }, [customerId, asOf]);
 
   function scrollToPdfPreview() {
+    setPdfPreviewNonce((n) => n + 1);
     document
       .getElementById("statement-pdf-preview")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -110,6 +115,21 @@ function StatementsInner() {
     }));
     return computeStatementTotals(sd, rowsParsed);
   }, [excelPreviewData]);
+
+  useEffect(() => {
+    setExcelPage(1);
+  }, [excelPreviewOpen, excelPreviewData]);
+
+  const excelTotalPages = Math.max(
+    1,
+    Math.ceil((excelPreviewData?.rows.length ?? 0) / Math.max(1, excelPageSize))
+  );
+  const safeExcelPage = Math.min(Math.max(1, excelPage), excelTotalPages);
+  const pagedExcelRows = useMemo(() => {
+    const rows = excelPreviewData?.rows ?? [];
+    const start = (safeExcelPage - 1) * excelPageSize;
+    return rows.slice(start, start + excelPageSize);
+  }, [excelPreviewData, safeExcelPage, excelPageSize]);
 
   return (
     <div className="max-w-5xl space-y-4">
@@ -210,7 +230,7 @@ function StatementsInner() {
           <p className="p-8 text-center text-sm text-slate-500">Select a customer to preview.</p>
         ) : (
           <iframe
-            key={`${customerId}-${asOf}`}
+            key={`${customerId}-${asOf}-${pdfPreviewNonce}`}
             title="Statement PDF preview"
             className="h-[75vh] w-full bg-white"
             src={pdfViewUrl}
@@ -246,7 +266,7 @@ function StatementsInner() {
                   </tr>
                 </thead>
                 <tbody>
-                  {excelPreviewData.rows.map((r, i) => (
+                  {pagedExcelRows.map((r, i) => (
                     <tr key={i} className="border-b border-zinc-100">
                       <td className="p-2 whitespace-nowrap">
                         {formatInvoiceDate(r.issueDate)}
@@ -266,6 +286,19 @@ function StatementsInner() {
                 </tbody>
               </table>
             </div>
+
+            <TablePagination
+              total={excelPreviewData.rows.length}
+              page={safeExcelPage}
+              pageSize={excelPageSize}
+              itemLabel="rows"
+              onPage={setExcelPage}
+              onPageSize={(s) => {
+                setExcelPage(1);
+                setExcelPageSize(s);
+              }}
+              className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"
+            />
             {excelTotals ? (
               <p className="text-sm text-slate-700">
                 Total owed:{" "}

@@ -1,11 +1,41 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  usePathname,
+  useRouter,
+  useSearchParams,
+  type ReadonlyURLSearchParams,
+} from "next/navigation";
 import { usePersistedPageState } from "@/hooks/usePersistedPageState";
+import { TablePagination } from "@/components/TablePagination";
 
 type Site = { _id: string; address: string };
 
+function intParam(
+  sp: ReadonlyURLSearchParams,
+  key: string,
+  fallback: number
+): number {
+  const raw = sp.get(key);
+  if (!raw) return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export default function SitesPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-500">Loading…</p>}>
+      <SitesInner />
+    </Suspense>
+  );
+}
+
+function SitesInner() {
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
   const [list, setList] = useState<Site[]>([]);
   const initialDraft = useMemo(
     () => ({
@@ -19,6 +49,15 @@ export default function SitesPage() {
   const [draft, setDraft] = usePersistedPageState(initialDraft);
   const { address, search, editingId, editValue } = draft;
   const [err, setErr] = useState("");
+
+  const [page, setPage] = useState(() => intParam(sp, "page", 1));
+  const [pageSize, setPageSize] = useState(() => intParam(sp, "pageSize", 3));
+  const didInitPagingRef = useRef(false);
+
+  useEffect(() => {
+    setPage(intParam(sp, "page", 1));
+    setPageSize(intParam(sp, "pageSize", 3));
+  }, [sp]);
 
   const searchTerms = useMemo(
     () =>
@@ -37,6 +76,34 @@ export default function SitesPage() {
       return searchTerms.every((t) => hay.includes(t));
     });
   }, [list, searchTerms]);
+
+  const setUrlPagination = useCallback(
+    (next: { page?: number; pageSize?: number }) => {
+      const params = new URLSearchParams(sp.toString());
+      if (next.page !== undefined) params.set("page", String(next.page));
+      if (next.pageSize !== undefined) params.set("pageSize", String(next.pageSize));
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname, sp]
+  );
+
+  useEffect(() => {
+    if (!didInitPagingRef.current) {
+      didInitPagingRef.current = true;
+      return;
+    }
+    setUrlPagination({ page: 1 });
+  }, [search, setUrlPagination]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredList.length / Math.max(1, pageSize))
+  );
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pagedSites = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filteredList.slice(start, start + pageSize);
+  }, [filteredList, safePage, pageSize]);
 
   async function load() {
     const r = await fetch("/api/site-addresses/registry");
@@ -148,7 +215,7 @@ export default function SitesPage() {
               : "No site addresses match your search."}
           </li>
         ) : (
-          filteredList.map((s) => (
+          pagedSites.map((s) => (
             <li key={s._id} className="flex flex-col gap-2 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
               {editingId === s._id ? (
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
@@ -209,6 +276,15 @@ export default function SitesPage() {
           ))
         )}
       </ul>
+
+      <TablePagination
+        total={filteredList.length}
+        page={safePage}
+        pageSize={pageSize}
+        itemLabel="site addresses"
+        onPage={(p) => setUrlPagination({ page: p })}
+        onPageSize={(s) => setUrlPagination({ page: 1, pageSize: s })}
+      />
     </div>
   );
 }

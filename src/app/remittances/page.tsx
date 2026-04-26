@@ -5,6 +5,7 @@ import { formatInvoiceDate, formatUiDate } from "@/lib/format/dates";
 import { formatAmountForInput, formatPounds, parseAmountInput } from "@/lib/format/money";
 import { usePersistedPageState } from "@/hooks/usePersistedPageState";
 import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
+import { TablePagination } from "@/components/TablePagination";
 
 type Customer = { _id: string; name: string };
 type Bank = { accountLabel: string; bankName: string };
@@ -245,6 +246,23 @@ export default function RemittancesPage() {
     });
   }, [rows, searchTerms]);
 
+  const [invPage, setInvPage] = useState(1);
+  const [invPageSize, setInvPageSize] = useState(3);
+
+  useEffect(() => {
+    setInvPage(1);
+  }, [invoiceSearch, customerId]);
+
+  const totalInvPages = Math.max(
+    1,
+    Math.ceil(filteredRows.length / Math.max(1, invPageSize))
+  );
+  const safeInvPage = Math.min(Math.max(1, invPage), totalInvPages);
+  const pagedRows = useMemo(() => {
+    const start = (safeInvPage - 1) * invPageSize;
+    return filteredRows.slice(start, start + invPageSize);
+  }, [filteredRows, safeInvPage, invPageSize]);
+
   return (
     <div className="max-w-6xl space-y-6">
       <div>
@@ -448,7 +466,7 @@ export default function RemittancesPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredRows.map((row) => (
+                  pagedRows.map((row) => (
                     <tr
                       key={row._id}
                       className="border-b border-slate-100 hover:bg-slate-50/80"
@@ -498,6 +516,20 @@ export default function RemittancesPage() {
             </table>
           </div>
         </div>
+
+        {customerId && filteredRows.length > 0 ? (
+          <TablePagination
+            total={filteredRows.length}
+            page={safeInvPage}
+            pageSize={invPageSize}
+            itemLabel="invoices"
+            onPage={setInvPage}
+            onPageSize={(s) => {
+              setInvPage(1);
+              setInvPageSize(s);
+            }}
+          />
+        ) : null}
 
         {err ? (
           <p className="text-sm text-red-600 whitespace-pre-wrap">{err}</p>

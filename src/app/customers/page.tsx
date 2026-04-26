@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import {
+  usePathname,
+  useRouter,
+  useSearchParams,
+  type ReadonlyURLSearchParams,
+} from "next/navigation";
 import { usePersistedPageState } from "@/hooks/usePersistedPageState";
 import { formatPounds } from "@/lib/format/money";
+import { TablePagination } from "@/components/TablePagination";
 
 type Customer = {
   _id: string;
@@ -12,7 +19,30 @@ type Customer = {
   externalRef?: string;
 };
 
+function intParam(
+  sp: ReadonlyURLSearchParams,
+  key: string,
+  fallback: number
+): number {
+  const raw = sp.get(key);
+  if (!raw) return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export default function CustomersPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-500">Loading…</p>}>
+      <CustomersInner />
+    </Suspense>
+  );
+}
+
+function CustomersInner() {
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
   const [list, setList] = useState<Customer[]>([]);
   const [balances, setBalances] = useState<Record<string, number>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -39,6 +69,15 @@ export default function CustomersPage() {
     errors: { row: number; error: string }[];
   } | null>(null);
 
+  const [page, setPage] = useState(() => intParam(sp, "page", 1));
+  const [pageSize, setPageSize] = useState(() => intParam(sp, "pageSize", 3));
+  const didInitPagingRef = useRef(false);
+
+  useEffect(() => {
+    setPage(intParam(sp, "page", 1));
+    setPageSize(intParam(sp, "pageSize", 3));
+  }, [sp]);
+
   const searchTerms = useMemo(
     () =>
       search
@@ -58,6 +97,34 @@ export default function CustomersPage() {
       return searchTerms.every((t) => hay.includes(t));
     });
   }, [list, searchTerms]);
+
+  const setUrlPagination = useCallback(
+    (next: { page?: number; pageSize?: number }) => {
+      const params = new URLSearchParams(sp.toString());
+      if (next.page !== undefined) params.set("page", String(next.page));
+      if (next.pageSize !== undefined) params.set("pageSize", String(next.pageSize));
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname, sp]
+  );
+
+  useEffect(() => {
+    if (!didInitPagingRef.current) {
+      didInitPagingRef.current = true;
+      return;
+    }
+    setUrlPagination({ page: 1 });
+  }, [search, setUrlPagination]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredList.length / Math.max(1, pageSize))
+  );
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pagedCustomers = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filteredList.slice(start, start + pageSize);
+  }, [filteredList, safePage, pageSize]);
 
   async function load() {
     const [custR, balR] = await Promise.all([
@@ -282,7 +349,7 @@ export default function CustomersPage() {
       </div>
 
       <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white shadow-sm">
-        {filteredList.map((c) => (
+        {pagedCustomers.map((c) => (
           <li
             key={c._id}
             className="flex flex-col gap-2 px-4 py-3 text-sm sm:flex-row sm:items-start sm:justify-between"
@@ -421,6 +488,15 @@ export default function CustomersPage() {
           </li>
         ))}
       </ul>
+
+      <TablePagination
+        total={filteredList.length}
+        page={safePage}
+        pageSize={pageSize}
+        itemLabel="customers"
+        onPage={(p) => setUrlPagination({ page: p })}
+        onPageSize={(s) => setUrlPagination({ page: 1, pageSize: s })}
+      />
     </div>
   );
 }

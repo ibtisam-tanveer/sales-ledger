@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Suspense,
   useCallback,
@@ -19,6 +19,7 @@ import {
 import { usePersistedPageState } from "@/hooks/usePersistedPageState";
 import { ReportPreviewDialog } from "@/components/ReportPreviewDialog";
 import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
+import { TablePagination } from "@/components/TablePagination";
 
 type Customer = { _id: string; name: string };
 
@@ -117,6 +118,8 @@ function lineGrossPaySort(l: Line): number {
 
 function LedgerPageInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const preCustomerId = searchParams.get("customerId") ?? "";
 
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -140,6 +143,19 @@ function LedgerPageInner() {
   const [refContains, setRefContains] = useState("");
   const [actionErr, setActionErr] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(3);
+  const [didInitPaging, setDidInitPaging] = useState(false);
+
+  useEffect(() => {
+    const rawP = searchParams.get("page");
+    const rawS = searchParams.get("pageSize");
+    const p = rawP ? parseInt(rawP, 10) : 1;
+    const s = rawS ? parseInt(rawS, 10) : 3;
+    setPage(Number.isFinite(p) && p > 0 ? p : 1);
+    setPageSize(Number.isFinite(s) && s > 0 ? s : 3);
+  }, [searchParams]);
 
   const customerName = useMemo(
     () => customers.find((c) => c._id === customerId)?.name ?? "customer",
@@ -279,6 +295,35 @@ function LedgerPageInner() {
     });
     return rows;
   }, [viewLines, sortKey, sortDir]);
+
+  function setUrlPagination(next: { page?: number; pageSize?: number }) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next.page !== undefined) params.set("page", String(next.page));
+    if (next.pageSize !== undefined) params.set("pageSize", String(next.pageSize));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
+
+  useEffect(() => {
+    if (!didInitPaging) {
+      setDidInitPaging(true);
+      return;
+    }
+    setUrlPagination({ page: 1 });
+  }, [customerId, from, to, sortKey, sortDir, lineKindFilter, refContains]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totalPages = Math.max(1, Math.ceil(displayLines.length / Math.max(1, pageSize)));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pagedDisplayLines = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return displayLines.slice(start, start + pageSize);
+  }, [displayLines, safePage, pageSize]);
+
+  const closingBalanceGross = useMemo(() => {
+    if (!customerId) return undefined;
+    if (lines.length === 0) return openingGross ?? 0;
+    const last = lines[lines.length - 1];
+    return typeof last?.runningGross === "number" ? last.runningGross : undefined;
+  }, [customerId, lines, openingGross]);
 
   function cycleLedgerSort(key: LedgerSortKey) {
     if (sortKey !== key) {
@@ -633,7 +678,7 @@ function LedgerPageInner() {
                 </td>
               </tr>
             ) : null}
-            {displayLines.map((l) => (
+            {pagedDisplayLines.map((l) => (
               <tr key={rowKey(l)} className="border-b border-zinc-100">
                 <td className="p-2 whitespace-nowrap">
                   {l.kind === "invoice" ? formatInvoiceDate(l.date) : formatUiDate(l.date)}
@@ -698,8 +743,32 @@ function LedgerPageInner() {
               </tr>
             ))}
           </tbody>
+          {customerId && closingBalanceGross !== undefined ? (
+            <tfoot>
+              <tr className="border-t-2 border-zinc-200 bg-zinc-50 font-medium">
+                <td className="p-2" colSpan={6}>
+                  Closing balance
+                </td>
+                <td className="p-2 text-right tabular-nums">
+                  {formatPounds(closingBalanceGross)}
+                </td>
+                <td className="p-2" />
+              </tr>
+            </tfoot>
+          ) : null}
         </table>
       </div>
+
+      {customerId ? (
+        <TablePagination
+          total={displayLines.length}
+          page={safePage}
+          pageSize={pageSize}
+          itemLabel="rows"
+          onPage={(p) => setUrlPagination({ page: p })}
+          onPageSize={(s) => setUrlPagination({ page: 1, pageSize: s })}
+        />
+      ) : null}
 
       <ReportPreviewDialog
         open={previewOpen}
@@ -851,7 +920,7 @@ function LedgerPageInner() {
                   </td>
                 </tr>
               ) : (
-                displayLines.map((l) => (
+                pagedDisplayLines.map((l) => (
                   <tr key={`pv-${rowKey(l)}`} className="border-b border-zinc-100">
                     <td className="p-2 whitespace-nowrap">
                       {l.kind === "invoice"
@@ -925,8 +994,32 @@ function LedgerPageInner() {
                 ))
               )}
             </tbody>
+            {customerId && closingBalanceGross !== undefined ? (
+              <tfoot>
+                <tr className="border-t-2 border-zinc-200 bg-zinc-50 font-medium">
+                  <td className="p-2" colSpan={6}>
+                    Closing balance
+                  </td>
+                  <td className="p-2 text-right tabular-nums">
+                    {formatPounds(closingBalanceGross)}
+                  </td>
+                  <td className="p-2" />
+                </tr>
+              </tfoot>
+            ) : null}
           </table>
         </div>
+
+        {customerId ? (
+          <TablePagination
+            total={displayLines.length}
+            page={safePage}
+            pageSize={pageSize}
+            itemLabel="rows"
+            onPage={(p) => setUrlPagination({ page: p })}
+            onPageSize={(s) => setUrlPagination({ page: 1, pageSize: s })}
+          />
+        ) : null}
       </ReportPreviewDialog>
     </div>
   );

@@ -1,9 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  usePathname,
+  useRouter,
+  useSearchParams,
+  type ReadonlyURLSearchParams,
+} from "next/navigation";
 import { formatInvoiceDate, formatUiDate } from "@/lib/format/dates";
 import { formatAmountForInput, formatPounds, parseAmountInput } from "@/lib/format/money";
 import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
+import { TablePagination } from "@/components/TablePagination";
 
 type Customer = { _id: string; name: string };
 
@@ -46,13 +53,47 @@ function customerIdString(rem: RemittanceListRow): string {
   return String(c ?? "");
 }
 
+function intParam(
+  sp: ReadonlyURLSearchParams,
+  key: string,
+  fallback: number
+): number {
+  const raw = sp.get(key);
+  if (!raw) return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export default function BankActivityPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-500">Loading…</p>}>
+      <BankActivityInner />
+    </Suspense>
+  );
+}
+
+function BankActivityInner() {
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [filterCustomerId, setFilterCustomerId] = useState("");
   const [filterBankKey, setFilterBankKey] = useState("");
   const [rows, setRows] = useState<RemittanceListRow[]>([]);
   const [listErr, setListErr] = useState("");
   const [loading, setLoading] = useState(true);
+
+  const [page, setPage] = useState(() => intParam(sp, "page", 1));
+  const [pageSize, setPageSize] = useState(() => intParam(sp, "pageSize", 3));
+  const [invPage, setInvPage] = useState(1);
+  const [invPageSize, setInvPageSize] = useState(3);
+  const [didInitPaging, setDidInitPaging] = useState(false);
+
+  useEffect(() => {
+    setPage(intParam(sp, "page", 1));
+    setPageSize(intParam(sp, "pageSize", 3));
+  }, [sp]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCustomerName, setEditCustomerName] = useState("");
@@ -132,6 +173,21 @@ export default function BankActivityPage() {
     void loadList();
   }, [loadList]);
 
+  function setUrlPagination(next: { page?: number; pageSize?: number }) {
+    const params = new URLSearchParams(sp.toString());
+    if (next.page !== undefined) params.set("page", String(next.page));
+    if (next.pageSize !== undefined) params.set("pageSize", String(next.pageSize));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
+
+  useEffect(() => {
+    if (!didInitPaging) {
+      setDidInitPaging(true);
+      return;
+    }
+    setUrlPagination({ page: 1 });
+  }, [filterCustomerId, filterBankKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const searchTerms = useMemo(
     () =>
       invoiceSearch
@@ -157,6 +213,27 @@ export default function BankActivityPage() {
       return searchTerms.every((t) => hay.includes(t));
     });
   }, [invRows, searchTerms]);
+
+  useEffect(() => {
+    setInvPage(1);
+  }, [invoiceSearch, editingId]);
+
+  const totalReceiptPages = Math.max(1, Math.ceil(rows.length / Math.max(1, pageSize)));
+  const safeReceiptPage = Math.min(Math.max(1, page), totalReceiptPages);
+  const pagedReceipts = useMemo(() => {
+    const start = (safeReceiptPage - 1) * pageSize;
+    return rows.slice(start, start + pageSize);
+  }, [rows, safeReceiptPage, pageSize]);
+
+  const totalInvPages = Math.max(
+    1,
+    Math.ceil(filteredInvRows.length / Math.max(1, invPageSize))
+  );
+  const safeInvPage = Math.min(Math.max(1, invPage), totalInvPages);
+  const pagedInvRows = useMemo(() => {
+    const start = (safeInvPage - 1) * invPageSize;
+    return filteredInvRows.slice(start, start + invPageSize);
+  }, [filteredInvRows, safeInvPage, invPageSize]);
 
   const allocSum = useMemo(() => {
     return Object.entries(alloc).reduce((s, [, v]) => {
@@ -246,6 +323,7 @@ export default function BankActivityPage() {
     setInvRows([]);
     setAlloc({});
     setInvoiceSearch("");
+    setInvPage(1);
   }
 
   async function saveEdit(e: React.FormEvent) {
@@ -382,8 +460,13 @@ export default function BankActivityPage() {
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => (
-                  <tr key={row._id} className="border-b border-slate-100 hover:bg-slate-50/80">
+                pagedReceipts.map((row) => (
+                  <tr
+                    key={row._id}
+                    className="border-b border-slate-100 hover:bg-slate-50/80"
+                    onDoubleClick={() => void openEdit(row._id)}
+                    title="Double-click to open allocation details"
+                  >
                     <td className="px-3 py-2 whitespace-nowrap text-slate-800">
                       {formatUiDate(row.receivedAt)}
                     </td>
@@ -420,6 +503,15 @@ export default function BankActivityPage() {
           </table>
         </div>
       </div>
+
+      <TablePagination
+        total={rows.length}
+        page={safeReceiptPage}
+        pageSize={pageSize}
+        itemLabel="receipts"
+        onPage={(p) => setUrlPagination({ page: p })}
+        onPageSize={(s) => setUrlPagination({ page: 1, pageSize: s })}
+      />
 
       {editingId ? (
         <div className="rounded-lg border border-neutral-400/80 bg-neutral-50 p-4 shadow-sm">
@@ -537,7 +629,7 @@ export default function BankActivityPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredInvRows.map((row) => (
+                      pagedInvRows.map((row) => (
                         <tr key={row._id} className="border-b border-slate-100">
                           <td className="px-2 py-2 font-medium text-slate-900">
                             {row.invoiceNumber}
@@ -574,6 +666,19 @@ export default function BankActivityPage() {
                   </tbody>
                 </table>
               </div>
+
+              <TablePagination
+                total={filteredInvRows.length}
+                page={safeInvPage}
+                pageSize={invPageSize}
+                itemLabel="invoices"
+                onPage={setInvPage}
+                onPageSize={(s) => {
+                  setInvPage(1);
+                  setInvPageSize(s);
+                }}
+                className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
 
               {editErr ? (
                 <p className="text-sm text-red-600 whitespace-pre-wrap">{editErr}</p>

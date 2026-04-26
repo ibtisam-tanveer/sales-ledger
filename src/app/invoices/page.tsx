@@ -1,12 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
+import {
+  usePathname,
+  useRouter,
+  useSearchParams,
+  type ReadonlyURLSearchParams,
+} from "next/navigation";
 import type { InvoiceImportTemplate } from "@/lib/company-settings/invoice-import-template";
 import { INVOICE_IMPORT_PREFERRED_TEMPLATE_KEY } from "@/lib/ui/invoice-import-pref";
 import { formatInvoiceDate } from "@/lib/format/dates";
 import { formatPounds } from "@/lib/format/money";
 import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
+import { TablePagination } from "@/components/TablePagination";
 
 type Inv = {
   _id: string;
@@ -224,7 +239,30 @@ function reloadInvoices(setRows: (rows: Inv[]) => void) {
     });
 }
 
+function intParam(
+  sp: ReadonlyURLSearchParams,
+  key: string,
+  fallback: number
+): number {
+  const raw = sp.get(key);
+  if (!raw) return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export default function InvoiceRegisterPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-slate-500">Loading…</p>}>
+      <InvoiceRegisterInner />
+    </Suspense>
+  );
+}
+
+function InvoiceRegisterInner() {
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
   const [rows, setRows] = useState<Inv[]>([]);
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [filter, setFilter] = useState<string>("all");
@@ -234,6 +272,19 @@ export default function InvoiceRegisterPage() {
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchErr, setBatchErr] = useState("");
+  const [batchCustomerId, setBatchCustomerId] = useState("");
+  const [batchPoMode, setBatchPoMode] = useState<"no_change" | "set" | "clear">(
+    "no_change"
+  );
+  const [batchPoValue, setBatchPoValue] = useState("");
+  const [batchSiteMode, setBatchSiteMode] = useState<"no_change" | "set" | "clear">(
+    "no_change"
+  );
+  const [batchSiteValue, setBatchSiteValue] = useState("");
+  const [batchDueDate, setBatchDueDate] = useState("");
   const [sortKey, setSortKey] = useState<InvoiceSortKey>("issueDate");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [filterCustomerId, setFilterCustomerId] = useState("");
@@ -250,6 +301,15 @@ export default function InvoiceRegisterPage() {
   const [importMsg, setImportMsg] = useState("");
   const [importErr, setImportErr] = useState("");
   const importFileRef = useRef<HTMLInputElement>(null);
+  const didInitPagingRef = useRef(false);
+
+  const [page, setPage] = useState(() => intParam(sp, "page", 1));
+  const [pageSize, setPageSize] = useState(() => intParam(sp, "pageSize", 3));
+
+  useEffect(() => {
+    setPage(intParam(sp, "page", 1));
+    setPageSize(intParam(sp, "pageSize", 3));
+  }, [sp]);
 
   useEffect(() => {
     Promise.all([
@@ -544,6 +604,46 @@ export default function InvoiceRegisterPage() {
     return rows;
   }, [filtered2, sortKey, sortDir]);
 
+  const setUrlPagination = useCallback(
+    (next: { page?: number; pageSize?: number }) => {
+      const params = new URLSearchParams(sp.toString());
+      if (next.page !== undefined) params.set("page", String(next.page));
+      if (next.pageSize !== undefined) params.set("pageSize", String(next.pageSize));
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname, sp]
+  );
+
+  useEffect(() => {
+    if (!didInitPagingRef.current) {
+      didInitPagingRef.current = true;
+      return;
+    }
+    setUrlPagination({ page: 1 });
+  }, [
+    filter,
+    search,
+    sortKey,
+    sortDir,
+    filterCustomerId,
+    issueDateFrom,
+    issueDateTo,
+    postingDateFrom,
+    postingDateTo,
+    filterInvoiceNo,
+    filterSite,
+    grossFrom,
+    grossTo,
+    setUrlPagination,
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / Math.max(1, pageSize)));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pagedRows = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return sortedRows.slice(start, start + pageSize);
+  }, [sortedRows, safePage, pageSize]);
+
   function cycleInvoiceSort(key: InvoiceSortKey) {
     if (sortKey !== key) {
       setSortKey(key);
@@ -586,12 +686,56 @@ export default function InvoiceRegisterPage() {
     filter !== "all";
 
   const selectedIdsInView = useMemo(() => {
-    const set = new Set(sortedRows.map((r) => r._id));
+    const set = new Set(pagedRows.map((r) => r._id));
     return Object.keys(selected).filter((id) => selected[id] && set.has(id));
-  }, [sortedRows, selected]);
+  }, [pagedRows, selected]);
 
   const allSelectedInView =
-    sortedRows.length > 0 && selectedIdsInView.length === sortedRows.length;
+    pagedRows.length > 0 && selectedIdsInView.length === pagedRows.length;
+
+  async function applyBatchChange(ids: string[]) {
+    if (ids.length === 0) return;
+    setBatchErr("");
+    setTransferErr("");
+    setDeleteErr("");
+    setBatchBusy(true);
+    try {
+      const patch: Record<string, unknown> = {};
+      if (batchCustomerId.trim()) patch.customerId = batchCustomerId.trim();
+      if (batchPoMode === "set") patch.poNumber = batchPoValue;
+      if (batchPoMode === "clear") patch.poNumber = "";
+      if (batchSiteMode === "set") patch.siteAddress = batchSiteValue;
+      if (batchSiteMode === "clear") patch.siteAddress = "";
+      if (batchDueDate.trim()) patch.dueDate = batchDueDate.trim();
+
+      const r = await fetch("/api/invoices/batch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, patch }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setBatchErr(typeof d.error === "string" ? d.error : "Batch change failed");
+        return;
+      }
+
+      reloadInvoices(setRows);
+      setSelected((prev) => {
+        const next = { ...prev };
+        for (const id of ids) delete next[id];
+        return next;
+      });
+      setBatchOpen(false);
+      setBatchCustomerId("");
+      setBatchPoMode("no_change");
+      setBatchPoValue("");
+      setBatchSiteMode("no_change");
+      setBatchSiteValue("");
+      setBatchDueDate("");
+    } finally {
+      setBatchBusy(false);
+    }
+  }
 
   async function deleteMany(ids: string[]) {
     if (ids.length === 0) return;
@@ -703,22 +847,156 @@ export default function InvoiceRegisterPage() {
             <span>Select invoices to delete in bulk</span>
           )}
         </div>
-        <button
-          type="button"
-          disabled={selectedIdsInView.length === 0 || bulkBusy}
-          onClick={() => {
-            const ok = window.confirm(
-              `Delete ${selectedIdsInView.length} invoice(s)?\n\n` +
-                `Posted invoices will have their payment allocations removed and returned to receipts as unapplied.`
-            );
-            if (!ok) return;
-            void deleteMany(selectedIdsInView);
-          }}
-          className="rounded bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {bulkBusy ? "Deleting…" : "Delete selected"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={selectedIdsInView.length === 0}
+            onClick={() => {
+              setBatchErr("");
+              setBatchOpen((v) => !v);
+            }}
+            className="rounded border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Batch change
+          </button>
+          <button
+            type="button"
+            disabled={selectedIdsInView.length === 0 || bulkBusy}
+            onClick={() => {
+              const ok = window.confirm(
+                `Delete ${selectedIdsInView.length} invoice(s)?\n\n` +
+                  `Posted invoices will have their payment allocations removed and returned to receipts as unapplied.`
+              );
+              if (!ok) return;
+              void deleteMany(selectedIdsInView);
+            }}
+            className="rounded bg-red-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {bulkBusy ? "Deleting…" : "Delete selected"}
+          </button>
+        </div>
       </div>
+      {batchOpen ? (
+        <div className="rounded border border-slate-200 bg-white p-3 text-sm shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="font-medium text-slate-900">Batch change selected invoices</p>
+              <p className="text-xs text-slate-600">
+                Applies to <strong>{selectedIdsInView.length}</strong> invoice
+                {selectedIdsInView.length === 1 ? "" : "s"} in the current view.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="w-fit rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-900 hover:bg-slate-50"
+              onClick={() => setBatchOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1 font-medium text-slate-800">
+              Move to customer (optional)
+              <select
+                className="rounded border border-slate-300 bg-white px-2 py-2 text-slate-900"
+                value={batchCustomerId}
+                onChange={(e) => setBatchCustomerId(e.target.value)}
+              >
+                <option value="">No change</option>
+                {customers.map((c) => (
+                  <option key={c._id} value={c._id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-1 font-medium text-slate-800">
+              Due date (optional)
+              <input
+                type="date"
+                className="rounded border border-slate-300 bg-white px-2 py-2 text-slate-900"
+                value={batchDueDate}
+                onFocus={selectDateInputOnFocus}
+                onChange={(e) => setBatchDueDate(e.target.value)}
+              />
+            </label>
+
+            <div className="grid gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-slate-800">PO number</span>
+                <select
+                  className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                  value={batchPoMode}
+                  onChange={(e) => setBatchPoMode(e.target.value as typeof batchPoMode)}
+                  aria-label="PO number change mode"
+                >
+                  <option value="no_change">No change</option>
+                  <option value="set">Set value</option>
+                  <option value="clear">Clear</option>
+                </select>
+              </div>
+              <input
+                type="text"
+                className="rounded border border-slate-300 bg-white px-2 py-2 text-slate-900 disabled:bg-slate-100"
+                placeholder={batchPoMode === "set" ? "Enter PO number" : "—"}
+                disabled={batchPoMode !== "set"}
+                value={batchPoValue}
+                onChange={(e) => setBatchPoValue(e.target.value)}
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-slate-800">Site address</span>
+                <select
+                  className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                  value={batchSiteMode}
+                  onChange={(e) => setBatchSiteMode(e.target.value as typeof batchSiteMode)}
+                  aria-label="Site address change mode"
+                >
+                  <option value="no_change">No change</option>
+                  <option value="set">Set value</option>
+                  <option value="clear">Clear</option>
+                </select>
+              </div>
+              <textarea
+                className="min-h-[42px] rounded border border-slate-300 bg-white px-2 py-2 text-slate-900 disabled:bg-slate-100"
+                placeholder={batchSiteMode === "set" ? "Enter site address" : "—"}
+                disabled={batchSiteMode !== "set"}
+                value={batchSiteValue}
+                onChange={(e) => setBatchSiteValue(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {batchErr ? (
+            <p className="mt-2 whitespace-pre-wrap text-sm text-red-600" role="alert">
+              {batchErr}
+            </p>
+          ) : null}
+
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={batchBusy}
+              onClick={() => setBatchOpen(false)}
+              className="rounded border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={batchBusy}
+              onClick={() => void applyBatchChange(selectedIdsInView)}
+              className="rounded bg-zinc-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {batchBusy ? "Applying…" : "Apply changes"}
+            </button>
+          </div>
+        </div>
+      ) : null}
       {transferErr ? (
         <p className="text-sm text-red-600" role="alert">
           {transferErr}
@@ -789,7 +1067,7 @@ export default function InvoiceRegisterPage() {
                       const on = e.target.checked;
                       setSelected((prev) => {
                         const next = { ...prev };
-                        for (const r of sortedRows) next[r._id] = on;
+                        for (const r of pagedRows) next[r._id] = on;
                         return next;
                       });
                     }}
@@ -963,7 +1241,7 @@ export default function InvoiceRegisterPage() {
                 </td>
               </tr>
             ) : (
-              sortedRows.map((r) => (
+              pagedRows.map((r) => (
                 <tr key={r._id} className="border-b border-slate-100 hover:bg-slate-50/80">
                   <td className="align-top px-2 py-2">
                     <input
@@ -1092,6 +1370,15 @@ export default function InvoiceRegisterPage() {
           </tbody>
         </table>
       </div>
+
+      <TablePagination
+        total={sortedRows.length}
+        page={safePage}
+        pageSize={pageSize}
+        itemLabel="invoices"
+        onPage={(p) => setUrlPagination({ page: p })}
+        onPageSize={(s) => setUrlPagination({ page: 1, pageSize: s })}
+      />
     </div>
   );
 }

@@ -27,6 +27,13 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica",
     color: "#222",
   },
+  pageNumber: {
+    position: "absolute",
+    right: 32,
+    bottom: 14,
+    fontSize: 7.5,
+    color: "#666",
+  },
   title: {
     fontSize: 18,
     fontFamily: "Helvetica-Bold",
@@ -237,6 +244,10 @@ const styles = StyleSheet.create({
  * often overlap; explicit widths + gaps keep PO / site / invoice columns readable.
  */
 const COL_GAP = 4;
+/** Extra whitespace between Date and Invoice number (matches screenshot). */
+const DATE_INV_GAP = 18;
+/** Visual breathing room inside the Invoice number column. */
+const INV_CELL_PADDING_LEFT = 6;
 const COL = {
   date: 40,
   inv: 68,
@@ -251,11 +262,11 @@ const COL = {
 
 function cellBox(
   width: number,
-  options?: { last?: boolean }
+  options?: { last?: boolean; gapRight?: number }
 ): Record<string, string | number> {
   return {
     width,
-    marginRight: options?.last ? 0 : COL_GAP,
+    marginRight: options?.last ? 0 : (options?.gapRight ?? COL_GAP),
     flexShrink: 0,
     flexGrow: 0,
   };
@@ -286,10 +297,10 @@ function DataRow(props: { r: StatementRow; statementDate: Date }) {
   const invDisplay = String(r.invoiceNumber ?? "").trim() || "—";
   return (
     <View style={styles.dataRow} wrap={false}>
-      <View style={cellBox(COL.date)}>
+      <View style={cellBox(COL.date, { gapRight: DATE_INV_GAP })}>
         <Text wrap>{formatInvoiceDate(r.issueDate)}</Text>
       </View>
-      <View style={cellBox(COL.inv)}>
+      <View style={[cellBox(COL.inv), { paddingLeft: INV_CELL_PADDING_LEFT }]}>
         <Text wrap>{invDisplay}</Text>
       </View>
       <View style={cellBox(COL.po)}>
@@ -429,10 +440,10 @@ function PageHeader(props: {
         </>
       )}
       <View style={styles.tableHead}>
-        <View style={cellBox(COL.date)}>
+        <View style={cellBox(COL.date, { gapRight: DATE_INV_GAP })}>
           <Text style={styles.tableHeadCellText}>Date</Text>
         </View>
-        <View style={cellBox(COL.inv)}>
+        <View style={[cellBox(COL.inv), { paddingLeft: INV_CELL_PADDING_LEFT }]}>
           <Text style={styles.tableHeadCellText}>Invoice number</Text>
         </View>
         <View style={cellBox(COL.po)}>
@@ -767,6 +778,13 @@ export function StatementPdfDocument(props: {
     <Document>
       {pages.map((pageRows, pi) => (
         <Page key={pi} size="A4" style={styles.page} wrap={false}>
+          <Text
+            style={styles.pageNumber}
+            fixed
+            render={({ pageNumber, totalPages }) =>
+              `Page ${pageNumber} of ${totalPages}`
+            }
+          />
           <PageHeader
             company={company}
             customerName={customerName}
