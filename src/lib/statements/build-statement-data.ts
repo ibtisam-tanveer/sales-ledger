@@ -37,37 +37,46 @@ export async function buildStatementData(
 
   const asOfEnd = endOfDay(statementDate);
 
-  /** Outstanding sales only: unpaid (`open`) or partly allocated (`partially_paid`). Excludes drafts and fully-paid rows (`paid`). */
+  /**
+   * Statement is "as of" a point in time:
+   * - include invoices issued on/before the statement date (excluding drafts)
+   * - compute paid/balance using allocations received on/before the statement date
+   *
+   * Important: we must include invoices that are "paid" *today* but were still
+   * outstanding as-of the statement date (i.e. paid in the future).
+   */
   const invoices = await Invoice.find({
     customerId,
-    status: { $in: ["open", "partially_paid"] },
+    status: { $in: ["open", "partially_paid", "paid"] },
     issueDate: { $lte: asOfEnd },
     ...workspaceScopeOrLegacy(workspaceId),
   })
     .sort({ issueDate: 1 })
     .lean();
 
-  const rows: StatementRow[] = [];
-  for (const inv of invoices) {
-    const paid = await getTotalAllocatedForInvoiceUpTo(inv._id, asOfEnd);
-    const gross = roundMoney2((Number(inv.amountNet) || 0) + (Number(inv.amountVat) || 0));
-    const balance = gross - paid;
-    if (balance <= 0.01) continue;
-    const raw = inv.rawExtraction as { parsed?: { invoiceNumber?: string } } | null;
-    const invNo =
-      String(inv.invoiceNumber ?? "").trim() ||
-      String(raw?.parsed?.invoiceNumber ?? "").trim();
-    rows.push({
-      issueDate: new Date(inv.issueDate),
-      invoiceNumber: invNo || "—",
-      poNumber: inv.poNumber ?? "",
-      siteAddress: inv.siteAddress ?? "",
-      dueDate: new Date(inv.dueDate),
-      amountGross: gross,
-      paidGross: paid,
-      balanceGross: balance,
-    });
-  }
+  const rowsMaybe = await Promise.all(
+    invoices.map(async (inv): Promise<StatementRow | null> => {
+      const paid = await getTotalAllocatedForInvoiceUpTo(inv._id, asOfEnd);
+      const gross = roundMoney2((Number(inv.amountNet) || 0) + (Number(inv.amountVat) || 0));
+      const balance = gross - paid;
+      if (balance <= 0.01) return null;
+      const raw = inv.rawExtraction as { parsed?: { invoiceNumber?: string } } | null;
+      const invNo =
+        String(inv.invoiceNumber ?? "").trim() ||
+        String(raw?.parsed?.invoiceNumber ?? "").trim();
+      return {
+        issueDate: new Date(inv.issueDate),
+        invoiceNumber: invNo || "—",
+        poNumber: inv.poNumber ?? "",
+        siteAddress: inv.siteAddress ?? "",
+        dueDate: new Date(inv.dueDate),
+        amountGross: gross,
+        paidGross: paid,
+        balanceGross: balance,
+      };
+    })
+  );
+  const rows: StatementRow[] = rowsMaybe.filter((r): r is StatementRow => r != null);
 
   // Ensure deterministic ordering: date first, then invoice number within the same date.
   rows.sort((a, b) => {

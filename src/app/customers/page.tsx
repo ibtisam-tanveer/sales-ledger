@@ -88,6 +88,8 @@ function CustomersInner() {
     [search]
   );
 
+  const spString = useMemo(() => sp.toString(), [sp]);
+
   const filteredList = useMemo(() => {
     if (searchTerms.length === 0) return list;
     return list.filter((c) => {
@@ -100,12 +102,16 @@ function CustomersInner() {
 
   const setUrlPagination = useCallback(
     (next: { page?: number; pageSize?: number }) => {
-      const params = new URLSearchParams(sp.toString());
+      const params = new URLSearchParams(spString);
       if (next.page !== undefined) params.set("page", String(next.page));
       if (next.pageSize !== undefined) params.set("pageSize", String(next.pageSize));
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      const nextQuery = params.toString();
+      const currentUrl = spString ? `${pathname}?${spString}` : pathname;
+      const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+      if (nextUrl === currentUrl) return;
+      router.replace(nextUrl, { scroll: false });
     },
-    [router, pathname, sp]
+    [router, pathname, spString]
   );
 
   useEffect(() => {
