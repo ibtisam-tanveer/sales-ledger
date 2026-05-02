@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
-import {
-  contentDispositionHeader,
-  statementAttachmentFilename,
-} from "@/lib/format/download-filename";
-import { buildStatementData } from "@/lib/statements/build-statement-data";
-import { buildStatementExcelBuffer } from "@/lib/statements/build-statement-excel";
+import { contentDispositionHeader } from "@/lib/format/download-filename";
+import { buildStatementFileBuffer } from "@/lib/statements/build-statement-file";
 
 export async function GET(
   req: Request,
@@ -18,27 +14,16 @@ export async function GET(
       ? new Date(statementDateParam)
       : new Date();
 
-    const built = await buildStatementData(customerId, statementDate);
-    if (!built.ok) {
-      return NextResponse.json({ error: built.error }, { status: built.status });
+    const file = await buildStatementFileBuffer(customerId, statementDate, "xlsx");
+    if (!file.ok) {
+      return NextResponse.json({ error: file.error }, { status: file.status });
     }
 
-    const { customerName, customerAddress, company, statementDate: sd, rows } = built.data;
-
-    const buffer = await buildStatementExcelBuffer({
-      company,
-      customerName,
-      customerAddress,
-      statementDate: sd,
-      rows,
-    });
-
-    const filename = statementAttachmentFilename(customerName, sd, "xlsx");
-    return new NextResponse(new Uint8Array(buffer), {
+    return new NextResponse(new Uint8Array(file.buffer), {
       headers: {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": contentDispositionHeader("attachment", filename),
+        "Content-Disposition": contentDispositionHeader("attachment", file.filename),
       },
     });
   } catch (e) {

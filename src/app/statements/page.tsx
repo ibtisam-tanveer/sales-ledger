@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { parseISO } from "date-fns";
 import { formatInvoiceDate, formatUiDate } from "@/lib/format/dates";
+import { statementAttachmentFilename } from "@/lib/format/download-filename";
 import { formatPounds } from "@/lib/format/money";
 import { usePersistedPageState } from "@/hooks/usePersistedPageState";
 import { computeStatementTotals } from "@/lib/statements/statement-math";
@@ -11,6 +12,8 @@ import type { StatementRow } from "@/lib/statement-pdf/statement-document";
 import { ReportPreviewDialog } from "@/components/ReportPreviewDialog";
 import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 import { TablePagination } from "@/components/TablePagination";
+
+const ALL_CUSTOMERS_VALUE = "__all__";
 
 type Customer = { _id: string; name: string };
 
@@ -48,6 +51,10 @@ function StatementsInner() {
   const [excelPreviewLoading, setExcelPreviewLoading] = useState(false);
   const [excelPage, setExcelPage] = useState(1);
   const [excelPageSize, setExcelPageSize] = useState(3);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+
+  const isAllCustomers = customerId === ALL_CUSTOMERS_VALUE;
+  const hasSelection = Boolean(customerId);
 
   useEffect(() => {
     fetch("/api/customers", { cache: "no-store" })
@@ -62,19 +69,19 @@ function StatementsInner() {
   }, [pre, setDraft]);
 
   const pdfViewUrl = useMemo(() => {
-    if (!customerId) return "";
+    if (!customerId || isAllCustomers) return "";
     return `/api/statements/${customerId}/pdf?asOf=${encodeURIComponent(asOf)}&mode=inline&nonce=${pdfPreviewNonce}`;
-  }, [customerId, asOf, pdfPreviewNonce]);
+  }, [customerId, isAllCustomers, asOf, pdfPreviewNonce]);
 
   const pdfDownloadUrl = useMemo(() => {
-    if (!customerId) return "";
+    if (!customerId || isAllCustomers) return "";
     return `/api/statements/${customerId}/pdf?asOf=${encodeURIComponent(asOf)}`;
-  }, [customerId, asOf]);
+  }, [customerId, isAllCustomers, asOf]);
 
   const excelUrl = useMemo(() => {
-    if (!customerId) return "";
+    if (!customerId || isAllCustomers) return "";
     return `/api/statements/${customerId}/xlsx?asOf=${encodeURIComponent(asOf)}`;
-  }, [customerId, asOf]);
+  }, [customerId, isAllCustomers, asOf]);
 
   function scrollToPdfPreview() {
     setPdfPreviewNonce((n) => n + 1);
@@ -84,7 +91,7 @@ function StatementsInner() {
   }
 
   async function openExcelPreview() {
-    if (!customerId) return;
+    if (!customerId || isAllCustomers) return;
     setExcelPreviewLoading(true);
     setExcelPreviewErr("");
     try {
@@ -131,6 +138,60 @@ function StatementsInner() {
     return rows.slice(start, start + excelPageSize);
   }, [excelPreviewData, safeExcelPage, excelPageSize]);
 
+  const statementDateForFilename = useMemo(() => parseISO(asOf), [asOf]);
+
+  function triggerBrowserDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadStatementsForAllCustomers(format: "pdf" | "xlsx") {
+    setBulkDownloading(true);
+    try {
+      const elR = await fetch(
+        `/api/statements/bulk-eligible?asOf=${encodeURIComponent(asOf)}`,
+        { cache: "no-store" }
+      );
+      const elD = (await elR.json()) as {
+        customers?: { customerId: string; name: string }[];
+        error?: string;
+      };
+      if (!elR.ok) {
+        window.alert(elD.error ?? "Could not load customer list.");
+        return;
+      }
+      const list = elD.customers ?? [];
+      if (list.length === 0) {
+        window.alert(
+          "No customers have a non-zero statement balance for this date. Nothing to download."
+        );
+        return;
+      }
+      const ext = format === "pdf" ? "pdf" : "xlsx";
+      for (const c of list) {
+        const url = `/api/statements/${c.customerId}/${ext}?asOf=${encodeURIComponent(asOf)}`;
+        const fileR = await fetch(url, { cache: "no-store" });
+        if (!fileR.ok) {
+          const err = await fileR.json().catch(() => ({}));
+          console.error(err);
+          continue;
+        }
+        const blob = await fileR.blob();
+        const filename = statementAttachmentFilename(c.name, statementDateForFilename, ext);
+        triggerBrowserDownload(blob, filename);
+        await new Promise((r) => setTimeout(r, 350));
+      }
+    } finally {
+      setBulkDownloading(false);
+    }
+  }
+
   return (
     <div className="max-w-5xl space-y-4">
       <h1 className="text-xl font-semibold text-slate-900">Customer statement</h1>
@@ -140,6 +201,10 @@ function StatementsInner() {
         <strong>Preview PDF</strong> for the full PDF layout, or{" "}
         <strong>Preview Excel</strong> for the same figures in a table (matches the
         Excel file). Download PDF or Excel when ready.
+      </p>
+      <p className="text-sm text-slate-600">
+        Choose <strong>All customers</strong> to download one file per customer. For all
+        customers, only statements with a <strong>non-zero balance</strong> are included.
       </p>
       <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm text-sm">
         <label className="grid gap-1 font-medium text-slate-800">
@@ -152,6 +217,7 @@ function StatementsInner() {
             }
           >
             <option value="">Select…</option>
+            <option value={ALL_CUSTOMERS_VALUE}>All customers (non-zero balance only)</option>
             {customers.map((c) => (
               <option key={c._id} value={c._id}>
                 {c.name}
@@ -172,10 +238,10 @@ function StatementsInner() {
         <div className="flex flex-wrap gap-2 pt-1">
           <button
             type="button"
-            disabled={!customerId}
+            disabled={!hasSelection || isAllCustomers}
             onClick={scrollToPdfPreview}
             className={`inline-flex rounded border border-slate-300 px-4 py-2 text-sm font-medium ${
-              customerId
+              hasSelection && !isAllCustomers
                 ? "bg-white text-slate-900 hover:bg-slate-50"
                 : "cursor-not-allowed bg-slate-100 text-slate-500"
             }`}
@@ -184,38 +250,68 @@ function StatementsInner() {
           </button>
           <button
             type="button"
-            disabled={!customerId || excelPreviewLoading}
+            disabled={!hasSelection || isAllCustomers || excelPreviewLoading}
             onClick={() => void openExcelPreview()}
             className={`inline-flex rounded border border-slate-300 px-4 py-2 text-sm font-medium ${
-              customerId
+              hasSelection && !isAllCustomers
                 ? "bg-white text-slate-900 hover:bg-slate-50"
                 : "cursor-not-allowed bg-slate-100 text-slate-500"
             }`}
           >
             {excelPreviewLoading ? "Loading…" : "Preview Excel"}
           </button>
-          <a
-            href={pdfDownloadUrl || "#"}
-            aria-disabled={!customerId}
-            className={`inline-flex rounded px-4 py-2 text-sm font-medium text-white ${
-              customerId
-                ? "bg-zinc-900 hover:bg-zinc-800"
-                : "cursor-not-allowed bg-zinc-400 pointer-events-none"
-            }`}
-          >
-            Download PDF
-          </a>
-          <a
-            href={excelUrl || "#"}
-            aria-disabled={!customerId}
-            className={`inline-flex rounded border border-slate-300 px-4 py-2 text-sm font-medium ${
-              customerId
-                ? "bg-white text-slate-900 hover:bg-slate-50"
-                : "cursor-not-allowed bg-slate-100 text-slate-500 pointer-events-none"
-            }`}
-          >
-            Download Excel
-          </a>
+          {isAllCustomers ? (
+            <button
+              type="button"
+              disabled={!hasSelection || bulkDownloading}
+              onClick={() => void downloadStatementsForAllCustomers("pdf")}
+              className={`inline-flex rounded px-4 py-2 text-sm font-medium text-white ${
+                hasSelection && !bulkDownloading
+                  ? "bg-zinc-900 hover:bg-zinc-800"
+                  : "cursor-not-allowed bg-zinc-400"
+              }`}
+            >
+              {bulkDownloading ? "Downloading…" : "Download PDF"}
+            </button>
+          ) : (
+            <a
+              href={pdfDownloadUrl || "#"}
+              aria-disabled={!hasSelection}
+              className={`inline-flex rounded px-4 py-2 text-sm font-medium text-white ${
+                hasSelection
+                  ? "bg-zinc-900 hover:bg-zinc-800"
+                  : "cursor-not-allowed bg-zinc-400 pointer-events-none"
+              }`}
+            >
+              Download PDF
+            </a>
+          )}
+          {isAllCustomers ? (
+            <button
+              type="button"
+              disabled={!hasSelection || bulkDownloading}
+              onClick={() => void downloadStatementsForAllCustomers("xlsx")}
+              className={`inline-flex rounded border border-slate-300 px-4 py-2 text-sm font-medium ${
+                hasSelection && !bulkDownloading
+                  ? "bg-white text-slate-900 hover:bg-slate-50"
+                  : "cursor-not-allowed bg-slate-100 text-slate-500"
+              }`}
+            >
+              {bulkDownloading ? "Downloading…" : "Download Excel"}
+            </button>
+          ) : (
+            <a
+              href={excelUrl || "#"}
+              aria-disabled={!hasSelection}
+              className={`inline-flex rounded border border-slate-300 px-4 py-2 text-sm font-medium ${
+                hasSelection
+                  ? "bg-white text-slate-900 hover:bg-slate-50"
+                  : "cursor-not-allowed bg-slate-100 text-slate-500 pointer-events-none"
+              }`}
+            >
+              Download Excel
+            </a>
+          )}
         </div>
       </div>
 
@@ -226,8 +322,12 @@ function StatementsInner() {
         <div className="border-b border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600">
           Preview (PDF)
         </div>
-        {!customerId ? (
+        {!hasSelection ? (
           <p className="p-8 text-center text-sm text-slate-500">Select a customer to preview.</p>
+        ) : isAllCustomers ? (
+          <p className="p-8 text-center text-sm text-slate-600">
+            PDF preview is available for a single customer. Use download for all customers.
+          </p>
         ) : (
           <iframe
             key={`${customerId}-${asOf}-${pdfPreviewNonce}`}

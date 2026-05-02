@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
-import {
-  contentDispositionHeader,
-  statementAttachmentFilename,
-} from "@/lib/format/download-filename";
-import { buildStatementData } from "@/lib/statements/build-statement-data";
-import { renderStatementPdfBuffer } from "@/lib/statement-pdf/render-statement";
+import { contentDispositionHeader } from "@/lib/format/download-filename";
+import { buildStatementFileBuffer } from "@/lib/statements/build-statement-file";
 
 export async function GET(
   req: Request,
@@ -20,25 +16,14 @@ export async function GET(
     const mode = searchParams.get("mode");
     const inline = mode === "inline";
 
-    const built = await buildStatementData(customerId, statementDate);
-    if (!built.ok) {
-      return NextResponse.json({ error: built.error }, { status: built.status });
+    const file = await buildStatementFileBuffer(customerId, statementDate, "pdf");
+    if (!file.ok) {
+      return NextResponse.json({ error: file.error }, { status: file.status });
     }
 
-    const { customerName, customerAddress, company, statementDate: sd, rows } = built.data;
+    const disposition = contentDispositionHeader(inline ? "inline" : "attachment", file.filename);
 
-    const buffer = await renderStatementPdfBuffer({
-      company,
-      customerName,
-      customerAddress,
-      statementDate: sd,
-      rows,
-    });
-
-    const filename = statementAttachmentFilename(customerName, sd, "pdf");
-    const disposition = contentDispositionHeader(inline ? "inline" : "attachment", filename);
-
-    return new NextResponse(Buffer.from(buffer), {
+    return new NextResponse(new Uint8Array(file.buffer), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": disposition,
