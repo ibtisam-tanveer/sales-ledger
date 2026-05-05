@@ -3,17 +3,23 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { addDays, format, parseISO } from "date-fns";
-import { formatAmountForInput, parseAmountInput } from "@/lib/format/money";
+import { formatAmountForInput, formatPounds, parseAmountInput } from "@/lib/format/money";
 import { validateInvoiceMath } from "@/lib/validation/invoice-math";
 import { invoiceCalendarDayKeyLondon } from "@/lib/format/dates";
 import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 
 const VAT_RATE = 0.2;
+const VAT_TOLERANCE = 0.05;
 /** Default payment terms when issue date changes (due date stays editable). */
 const DUE_DAYS_AFTER_ISSUE = 30;
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function maxVatAllowed(net: number): number {
+  if (!Number.isFinite(net) || net <= 0) return 0;
+  return net * VAT_RATE + VAT_TOLERANCE;
 }
 
 type Line = {
@@ -59,8 +65,8 @@ export default function ReviewInvoicePage() {
   const [siteAddress, setSiteAddress] = useState("");
   const [issueDate, setIssueDate] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [amountNet, setAmountNet] = useState(0);
-  const [amountVat, setAmountVat] = useState(0);
+  const [amountNet, setAmountNet] = useState("");
+  const [amountVat, setAmountVat] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function load() {
@@ -102,11 +108,19 @@ export default function ReviewInvoicePage() {
     // Use UK calendar date to avoid “off by one” from UTC ISO strings.
     setIssueDate(invoiceCalendarDayKeyLondon(inv.issueDate) || inv.issueDate.slice(0, 10));
     setDueDate(invoiceCalendarDayKeyLondon(inv.dueDate) || inv.dueDate.slice(0, 10));
-    setAmountNet(Number(inv.amountNet) || 0);
-    setAmountVat(Number(inv.amountVat) || 0);
+    setAmountNet(formatAmountForInput(Number(inv.amountNet) || 0));
+    setAmountVat(formatAmountForInput(Number(inv.amountVat) || 0));
   }, [inv]);
 
-  const amountGross = round2(amountNet + amountVat);
+  const netNum = parseAmountInput(amountNet);
+  const vatNum = parseAmountInput(amountVat);
+  const amountGrossNum =
+    Number.isFinite(netNum) && Number.isFinite(vatNum)
+      ? round2(netNum + vatNum)
+      : NaN;
+  const grossFieldValue = Number.isFinite(amountGrossNum)
+    ? formatAmountForInput(amountGrossNum)
+    : "";
 
   function dueDateFromIssueYmd(issueYmd: string): string {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(issueYmd)) return issueYmd;
@@ -115,25 +129,36 @@ export default function ReviewInvoicePage() {
   }
 
   function onNetChange(raw: string) {
-    const n = parseAmountInput(raw);
+    setAmountNet(raw);
     if (raw.trim() === "") {
-      setAmountNet(0);
-      setAmountVat(0);
+      setAmountVat("");
       return;
     }
-    if (!Number.isFinite(n)) return;
-    setAmountNet(n);
-    setAmountVat(round2(n * VAT_RATE));
+    const n = parseAmountInput(raw);
+    if (Number.isFinite(n)) {
+      setAmountVat(String(round2(n * VAT_RATE)));
+    }
+  }
+
+  function onNetBlur() {
+    const n = parseAmountInput(amountNet);
+    if (Number.isFinite(n) && n >= 0) {
+      setAmountNet(formatAmountForInput(n));
+    }
   }
 
   function onVatChange(raw: string) {
-    const n = parseAmountInput(raw);
-    if (raw.trim() === "") {
-      setAmountVat(0);
-      return;
-    }
-    if (!Number.isFinite(n)) return;
-    setAmountVat(n);
+    setAmountVat(raw);
+  }
+
+  function onVatBlur() {
+    const n = parseAmountInput(amountNet);
+    let v = parseAmountInput(amountVat);
+    if (!Number.isFinite(n) || n <= 0) return;
+    if (!Number.isFinite(v)) return;
+    const cap = maxVatAllowed(n);
+    v = Math.min(Math.max(0, v), cap);
+    setAmountVat(String(round2(v)));
   }
 
   async function handleSave() {
@@ -143,6 +168,25 @@ export default function ReviewInvoicePage() {
       setErr("Choose a customer.");
       return;
     }
+    const netParsed = parseAmountInput(amountNet);
+    const vatParsed = parseAmountInput(amountVat);
+    if (!Number.isFinite(netParsed) || netParsed <= 0) {
+      setErr("Enter a net amount greater than zero.");
+      return;
+    }
+    if (!Number.isFinite(vatParsed) || vatParsed < 0) {
+      setErr("Enter a valid VAT amount (zero or more).");
+      return;
+    }
+    const vatCap = maxVatAllowed(netParsed);
+    if (vatParsed > vatCap) {
+      setErr(
+        `VAT cannot exceed ${formatPounds(vatCap)} (20% of net plus penny tolerance).`
+      );
+      return;
+    }
+    const grossParsed = round2(netParsed + vatParsed);
+
     setSaving(true);
     try {
       const isDraftNow = inv.status === "draft";
@@ -154,9 +198,9 @@ export default function ReviewInvoicePage() {
         siteAddress,
         issueDate,
         dueDate,
-        amountNet,
-        amountVat,
-        amountGross,
+        amountNet: netParsed,
+        amountVat: vatParsed,
+        amountGross: grossParsed,
       };
       const m = validateInvoiceMath(
         merged.lines.map((l) => ({
@@ -185,9 +229,9 @@ export default function ReviewInvoicePage() {
           siteAddress,
           issueDate,
           dueDate,
-          amountNet,
-          amountVat,
-          amountGross,
+          amountNet: netParsed,
+          amountVat: vatParsed,
+          amountGross: grossParsed,
         }),
       });
       const d = await r.json();
@@ -387,8 +431,9 @@ export default function ReviewInvoicePage() {
                 inputMode="decimal"
                 autoComplete="off"
                 className="w-full min-w-0 rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900 tabular-nums"
-                value={formatAmountForInput(amountNet)}
+                value={amountNet}
                 onChange={(e) => onNetChange(e.target.value)}
+                onBlur={onNetBlur}
               />
             </div>
             <div className="flex min-w-0 flex-col gap-1">
@@ -402,8 +447,9 @@ export default function ReviewInvoicePage() {
                 inputMode="decimal"
                 autoComplete="off"
                 className="w-full min-w-0 rounded border border-zinc-300 bg-white px-2 py-1.5 text-zinc-900 tabular-nums"
-                value={formatAmountForInput(amountVat)}
+                value={amountVat}
                 onChange={(e) => onVatChange(e.target.value)}
+                onBlur={onVatBlur}
               />
             </div>
             <div className="flex min-w-0 flex-col gap-1">
@@ -417,7 +463,7 @@ export default function ReviewInvoicePage() {
                 readOnly
                 tabIndex={-1}
                 className="w-full min-w-0 cursor-not-allowed rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-zinc-800 tabular-nums"
-                value={formatAmountForInput(amountGross)}
+                value={grossFieldValue}
               />
             </div>
           </div>
