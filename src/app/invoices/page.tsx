@@ -19,6 +19,7 @@ import {
 import type { InvoiceImportTemplate } from "@/lib/company-settings/invoice-import-template";
 import { INVOICE_IMPORT_PREFERRED_TEMPLATE_KEY } from "@/lib/ui/invoice-import-pref";
 import { formatInvoiceDate } from "@/lib/format/dates";
+import { invoiceRegisterFilename } from "@/lib/format/download-filename";
 import { formatPounds } from "@/lib/format/money";
 import { selectDateInputOnFocus } from "@/lib/ui/date-input-focus";
 import { TablePagination } from "@/components/TablePagination";
@@ -300,16 +301,14 @@ function InvoiceRegisterInner() {
   const [importBusy, setImportBusy] = useState(false);
   const [importMsg, setImportMsg] = useState("");
   const [importErr, setImportErr] = useState("");
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportErr, setExportErr] = useState("");
   const importFileRef = useRef<HTMLInputElement>(null);
   const didInitPagingRef = useRef(false);
 
-  const [page, setPage] = useState(() => intParam(sp, "page", 1));
-  const [pageSize, setPageSize] = useState(() => intParam(sp, "pageSize", 3));
-
-  useEffect(() => {
-    setPage(intParam(sp, "page", 1));
-    setPageSize(intParam(sp, "pageSize", 3));
-  }, [sp]);
+  /** Read from URL each render — `useSearchParams()` identity may not change on `router.replace`. */
+  const page = intParam(sp, "page", 1);
+  const pageSize = intParam(sp, "pageSize", 3);
 
   useEffect(() => {
     Promise.all([
@@ -604,6 +603,40 @@ function InvoiceRegisterInner() {
     return rows;
   }, [filtered2, sortKey, sortDir]);
 
+  async function downloadRegisterExport(format: "pdf" | "xlsx") {
+    setExportErr("");
+    const ids = sortedRows.map((r) => r._id);
+    if (ids.length === 0) {
+      setExportErr("Nothing to export — adjust filters or search.");
+      return;
+    }
+    setExportBusy(true);
+    try {
+      const r = await fetch("/api/invoices/register-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ format, ids }),
+      });
+      if (!r.ok) {
+        const d = (await r.json().catch(() => ({}))) as { error?: string };
+        setExportErr(typeof d.error === "string" ? d.error : "Export failed");
+        return;
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = invoiceRegisterFilename(format);
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   const setUrlPagination = useCallback(
     (next: { page?: number; pageSize?: number }) => {
       const params = new URLSearchParams(sp.toString());
@@ -784,6 +817,28 @@ function InvoiceRegisterInner() {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:items-end">
+          <p className="max-w-xs text-right text-xs text-slate-600">
+            <strong>Download</strong> uses the same filters and sort as the table (all matching
+            rows, not only the current page).
+          </p>
+          <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
+            <button
+              type="button"
+              disabled={exportBusy || sortedRows.length === 0}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+              onClick={() => void downloadRegisterExport("pdf")}
+            >
+              {exportBusy ? "Preparing…" : "Download PDF"}
+            </button>
+            <button
+              type="button"
+              disabled={exportBusy || sortedRows.length === 0}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 font-medium text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+              onClick={() => void downloadRegisterExport("xlsx")}
+            >
+              {exportBusy ? "Preparing…" : "Download Excel"}
+            </button>
+          </div>
           <Link
             href="/upload"
             className="inline-flex w-fit items-center rounded bg-neutral-600 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
@@ -810,8 +865,13 @@ function InvoiceRegisterInner() {
               {importBusy ? "Importing…" : "Import from Excel"}
             </button>
           </div>
+          {exportErr ? (
+            <p className="max-w-md text-right text-xs text-red-700" role="alert">
+              {exportErr}
+            </p>
+          ) : null}
           {importMsg ? (
-            <p className="text-xs text-slate-700 max-w-md text-right">{importMsg}</p>
+            <p className="max-w-md text-right text-xs text-slate-700">{importMsg}</p>
           ) : null}
           {importErr ? (
             <pre className="max-h-32 max-w-md overflow-auto whitespace-pre-wrap text-left text-xs text-red-700">

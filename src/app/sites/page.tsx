@@ -50,14 +50,11 @@ function SitesInner() {
   const { address, search, editingId, editValue } = draft;
   const [err, setErr] = useState("");
 
-  const [page, setPage] = useState(() => intParam(sp, "page", 1));
-  const [pageSize, setPageSize] = useState(() => intParam(sp, "pageSize", 3));
   const didInitPagingRef = useRef(false);
 
-  useEffect(() => {
-    setPage(intParam(sp, "page", 1));
-    setPageSize(intParam(sp, "pageSize", 3));
-  }, [sp]);
+  /** Read from URL each render — `useSearchParams()` identity may not change on `router.replace`. */
+  const page = intParam(sp, "page", 1);
+  const pageSize = intParam(sp, "pageSize", 3);
 
   const searchTerms = useMemo(
     () =>

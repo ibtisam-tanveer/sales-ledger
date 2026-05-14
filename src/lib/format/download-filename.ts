@@ -40,6 +40,11 @@ export function vatReportFilename(
   return `${base || "vat-report"}.${ext}`;
 }
 
+export function invoiceRegisterFilename(ext: "pdf" | "xlsx"): string {
+  const datePart = format(new Date(), "yyyy-MM-dd");
+  return `sales-invoice-register-${datePart}.${ext}`;
+}
+
 /** Content-Disposition header with ASCII fallback and UTF-8 filename*. */
 export function contentDispositionHeader(
   disposition: "inline" | "attachment",

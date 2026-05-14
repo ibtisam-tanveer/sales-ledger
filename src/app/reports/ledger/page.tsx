@@ -1,7 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  usePathname,
+  useRouter,
+  useSearchParams,
+  type ReadonlyURLSearchParams,
+} from "next/navigation";
 import {
   Suspense,
   useCallback,
@@ -116,6 +121,17 @@ function lineGrossPaySort(l: Line): number {
   return l.kind === "invoice" ? l.gross : -l.amount;
 }
 
+function intPaginationParam(
+  sp: ReadonlyURLSearchParams,
+  key: string,
+  fallback: number
+): number {
+  const raw = sp.get(key);
+  if (!raw) return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 function LedgerPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -144,18 +160,11 @@ function LedgerPageInner() {
   const [actionErr, setActionErr] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(3);
   const [didInitPaging, setDidInitPaging] = useState(false);
 
-  useEffect(() => {
-    const rawP = searchParams.get("page");
-    const rawS = searchParams.get("pageSize");
-    const p = rawP ? parseInt(rawP, 10) : 1;
-    const s = rawS ? parseInt(rawS, 10) : 3;
-    setPage(Number.isFinite(p) && p > 0 ? p : 1);
-    setPageSize(Number.isFinite(s) && s > 0 ? s : 3);
-  }, [searchParams]);
+  /** Read from URL each render — `useSearchParams()` identity may not change on `router.replace`. */
+  const page = intPaginationParam(searchParams, "page", 1);
+  const pageSize = intPaginationParam(searchParams, "pageSize", 3);
 
   const customerName = useMemo(
     () => customers.find((c) => c._id === customerId)?.name ?? "customer",

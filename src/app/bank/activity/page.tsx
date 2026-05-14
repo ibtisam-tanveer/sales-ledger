@@ -84,16 +84,12 @@ function BankActivityInner() {
   const [listErr, setListErr] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const [page, setPage] = useState(() => intParam(sp, "page", 1));
-  const [pageSize, setPageSize] = useState(() => intParam(sp, "pageSize", 3));
+  /** Read from URL each render — `useSearchParams()` identity may not change on `router.replace`. */
+  const page = intParam(sp, "page", 1);
+  const pageSize = intParam(sp, "pageSize", 3);
   const [invPage, setInvPage] = useState(1);
   const [invPageSize, setInvPageSize] = useState(3);
   const [didInitPaging, setDidInitPaging] = useState(false);
-
-  useEffect(() => {
-    setPage(intParam(sp, "page", 1));
-    setPageSize(intParam(sp, "pageSize", 3));
-  }, [sp]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCustomerName, setEditCustomerName] = useState("");
