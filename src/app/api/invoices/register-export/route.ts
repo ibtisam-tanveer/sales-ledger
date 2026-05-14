@@ -9,6 +9,7 @@ import {
   contentDispositionHeader,
   invoiceRegisterFilename,
 } from "@/lib/format/download-filename";
+import { coerceInvoiceCalendarDate } from "@/lib/format/dates";
 import { roundMoney2 } from "@/lib/format/money";
 import { Invoice } from "@/lib/models/invoice";
 import { requireWorkspaceObjectId } from "@/lib/workspace/resolve-workspace-id";
@@ -47,10 +48,12 @@ function mapDocToExportRow(doc: Record<string, unknown>): InvoiceRegisterExportR
       ? new Date(postedRaw as Date | string).toISOString()
       : null;
   const pdfPath = doc.pdfStoredPath;
+  const issueCal = coerceInvoiceCalendarDate(doc.issueDate);
+  const issueDateIso = issueCal ? issueCal.toISOString() : "";
   return {
     _id: String(doc._id),
     invoiceNumber: String(doc.invoiceNumber ?? ""),
-    issueDate: String(doc.issueDate ?? ""),
+    issueDate: issueDateIso,
     postedAt,
     customerName,
     siteAddress: typeof doc.siteAddress === "string" ? doc.siteAddress : "",
